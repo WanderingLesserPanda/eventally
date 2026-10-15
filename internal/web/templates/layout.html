@@ -14,6 +14,7 @@
   <a class="brand" href="/">Eventally</a>
   <nav>
     <a href="/" class="{{if eq .Path "/"}}active{{end}}">Dashboard</a>
+    <a href="/capture" class="{{if hasPrefix .Path "/capture"}}active{{end}}">Capture</a>
     <a href="/txns">Transactions</a>
     <a href="/cards">Cards</a>
     <a href="/reconcile">Reconcile</a>

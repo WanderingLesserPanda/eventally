@@ -34,6 +34,7 @@ func New(pool *pgxpool.Pool, tmplDir, dataDir string) (*App, error) {
 		"add":   func(a, b int) int { return a + b },
 		"orDash": orDash,
 		"hasPrefix": hasPrefix,
+	"contains":  containsStr,
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseGlob(filepath.Join(tmplDir, "*.html"))
 	if err != nil {
@@ -109,6 +110,11 @@ func (a *App) Router() http.Handler {
 		authed.Post("/txns/{id}/status", a.handleTxnStatus)
 		authed.Post("/txns/{id}/receipt", a.handleTxnReceiptUpload)
 		authed.Post("/txns/{id}/receipt/delete", a.handleTxnReceiptDelete)
+
+		// Phase P4: quick capture (mobile-first, D12) — a few taps to a
+		// pending transaction.
+		authed.Get("/capture", a.captureGET)
+		authed.Post("/capture", a.capturePOST)
 	})
 
 	return r

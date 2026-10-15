@@ -1,0 +1,50 @@
+{{define "page/capture"}}
+<div class="capture">
+  <h1>Quick capture</h1>
+  <p class="hint">A few taps: amount, card, merchant, who paid. Lands in pending review.</p>
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  <form method="post" action="/capture" class="stacked">
+    {{template "csrf" .}}
+    <label>Amount
+      <input type="text" name="amount" inputmode="decimal" required
+             value="{{.F.Amount}}" placeholder="0.00" autofocus>
+    </label>
+    <label>Date
+      <input type="date" name="date" required value="{{.F.Date}}">
+    </label>
+    <label>Card
+      <select name="account_id" required>
+        <option value="">— choose —</option>
+        {{range .F.CardAccounts}}
+        <option value="{{.ID}}" {{if eq $.F.CardID (printf "%d" .ID)}}selected{{end}}>{{.Name}}</option>
+        {{end}}
+      </select>
+    </label>
+    <label>Merchant
+      <input type="text" name="merchant" list="capture-merchants"
+             value="{{.F.Merch}}" placeholder="Pick a known merchant or type a new one">
+      <datalist id="capture-merchants">
+        {{range .F.Merchants}}
+        <option value="{{.Name}}"></option>
+        {{end}}
+      </datalist>
+      <span class="hint">Pick from the list, or type a new name to create it.</span>
+    </label>
+    <label>Description (optional)
+      <input type="text" name="description" value="{{.F.Desc}}" placeholder="e.g. groceries">
+    </label>
+    <fieldset class="capture-people">
+      <legend>Who paid (split equally)</legend>
+      {{range .F.Users}}
+      <label class="chip">
+        <input type="checkbox" name="part[]" value="user:{{.ID}}"
+          {{if contains $.F.Parts (printf "user:%d" .ID)}}checked{{end}}>
+        {{.Name}}
+      </label>
+      {{end}}
+    </fieldset>
+    <button type="submit" class="btn-primary">Capture</button>
+  </form>
+  <p class="hint">Need a percent/amount split, income or a transfer? Use the <a href="/txns/new">full form</a>.</p>
+</div>
+{{end}}

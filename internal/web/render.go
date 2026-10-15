@@ -106,3 +106,14 @@ func dateFmt(t time.Time) string {
 func hasPrefix(s, prefix string) bool {
 	return strings.HasPrefix(s, prefix)
 }
+
+// containsStr reports whether a string slice contains a value (templates
+// can't test membership natively — quick-capture checkbox preselect).
+func containsStr(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}

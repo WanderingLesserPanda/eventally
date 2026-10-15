@@ -90,3 +90,18 @@ table.kv th { text-align: left; width: 180px; font-size: 0.8rem; color: var(--mu
 tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
 .inline-form { display: inline-flex; gap: 0.6rem; align-items: center; }
 .inline-form input[type=file] { width: auto; display: inline-block; }
+
+/* P4: quick capture (mobile-first, D12) */
+.capture { max-width: 480px; margin: 0 auto; }
+.capture .hint { color: var(--muted); font-size: 0.85rem; margin: 0.2rem 0 1rem; }
+.capture form.stacked { display: block; }
+.capture input[type=text] { font-size: 1.05rem; padding: 0.7rem 0.7rem; }
+.capture input[name=amount] { font-size: 1.8rem; font-weight: 700; text-align: right; }
+.capture fieldset { border: 0; padding: 0; margin: 0.4rem 0 1rem; }
+.capture fieldset legend { font-weight: 600; font-size: 0.85rem; padding: 0; }
+.capture .chip { display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 400;
+  border: 1px solid var(--line); border-radius: 99px; padding: 0.4rem 0.85rem;
+  margin: 0 0.4rem 0.4rem 0; cursor: pointer; background: #fff; }
+.capture .chip:has(input:checked) { border-color: var(--accent); background: #eef4ff; color: var(--accent); }
+.capture .chip input { width: auto; margin: 0; }
+.capture .btn-primary { width: 100%; padding: 0.8rem; font-size: 1.05rem; }
