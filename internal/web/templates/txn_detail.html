@@ -1,0 +1,71 @@
+{{define "page/txn_detail"}}
+{{$root := .}}
+{{$t := .T}}
+<div class="card">
+  <div class="page-head">
+    <h1>{{if eq $t.Class "expense"}}Expense{{else if eq $t.Class "income"}}Income{{else}}Transfer{{end}} — {{date $t.Date}}</h1>
+    <div class="row-actions">
+      <a class="btn" href="/txns/{{.T.ID}}/edit">Edit</a>
+      <a class="btn" href="/txns">← All transactions</a>
+    </div>
+  </div>
+
+  <table class="kv">
+    <tr><th>Amount</th><td class="money">{{money $t.Total}}
+      {{if $t.Original}}<span class="muted small">= {{$t.Original}}{{if $t.Rate}} at {{$t.Rate}}{{end}}</span>{{end}}
+    </td></tr>
+    {{if $t.Description}}<tr><th>Description</th><td>{{$t.Description}}</td></tr>{{end}}
+    {{if $t.Merchant}}<tr><th>Merchant</th><td>{{$t.Merchant}}</td></tr>{{end}}
+    {{if $t.Category}}<tr><th>Category</th><td>{{$t.Category}}</td></tr>{{end}}
+    <tr><th>From → to</th><td>{{orDash $t.OriginLabel}} → {{orDash $t.DestLabel}}</td></tr>
+    <tr><th>Status</th><td><span class="tag">{{$t.Status}}</span></td></tr>
+    {{if $t.Source}}<tr><th>Source</th><td class="muted small">{{$t.Source}}</td></tr>{{end}}
+    {{if $t.RecordedBy}}<tr><th>Recorded by</th><td class="muted small">{{$t.RecordedBy}}</td></tr>{{end}}
+    {{if $t.Notes}}<tr><th>Notes</th><td>{{$t.Notes}}</td></tr>{{end}}
+  </table>
+
+  <h2>Splits</h2>
+  {{if $t.Splits}}
+  <table>
+    <tr><th>Participant</th><th class="money">Share</th><th class="money">%</th></tr>
+    {{range $t.Splits}}
+    <tr><td>{{.Participant}}</td><td class="money">{{money .Amount}}</td><td class="money">{{orDash .Pct}}</td></tr>
+    {{end}}
+    <tr class="total"><td>Total</td><td class="money">{{money $t.Total}}</td><td class="money">100%</td></tr>
+  </table>
+  {{else}}
+  <p class="muted">No splits recorded.</p>
+  {{end}}
+  {{if $t.HasAllocs}}<p class="muted small">A payment already references these splits — this transaction can no longer be edited or have its status changed.</p>{{end}}
+
+  <h2>Status</h2>
+  {{range .Statuses}}
+  {{if ne . $t.Status}}
+  <form method="post" action="/txns/{{$t.ID}}/status" style="display:inline"
+        {{if $t.HasAllocs}}onsubmit="return confirm('A payment references this transaction. Change status anyway?')"{{end}} >
+    {{template "csrf" $root}}
+    <input type="hidden" name="status" value="{{.}}">
+    <button class="btn small {{if eq . "void"}}btn-danger{{end}}">Mark {{.}}</button>
+  </form>
+  {{end}}
+  {{end}}
+
+  <h2>Receipt</h2>
+  {{if $t.ReceiptPath}}
+  <p>
+    <a href="/receipts/{{$t.ReceiptPath}}">View receipt</a> ·
+    <form method="post" action="/txns/{{$t.ID}}/receipt/delete" style="display:inline"
+          onsubmit="return confirm('Remove the receipt?')">
+      {{template "csrf" $root}}
+      <button class="btn-link btn-danger">Remove</button>
+    </form>
+  </p>
+  {{else}}
+  <form method="post" action="/txns/{{$t.ID}}/receipt" enctype="multipart/form-data" class="inline-form">
+    {{template "csrf" $root}}
+    <input type="file" name="file" accept=".jpg,.jpeg,.png,.webp,.gif,.pdf" required>
+    <button class="btn">Attach receipt (JPG/PNG/WebP/GIF/PDF, max 10 MB)</button>
+  </form>
+  {{end}}
+</div>
+{{end}}

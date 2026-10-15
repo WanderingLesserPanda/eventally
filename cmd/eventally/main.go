@@ -30,7 +30,7 @@ func main() {
 	}
 	defer database.Close()
 
-	app, err := web.New(database.Pool, "internal/web/templates")
+	app, err := web.New(database.Pool, "internal/web/templates", cfg.DataDir)
 	if err != nil {
 		log.Fatalf("templates: %v", err)
 	}

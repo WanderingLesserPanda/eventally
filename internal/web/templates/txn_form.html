@@ -1,0 +1,255 @@
+{{define "page/txn_form"}}
+{{$root := .}}
+{{$f := .F}}
+<div class="card">
+  <div class="page-head">
+    <h1>{{if $f.Editing}}Edit transaction{{else}}New transaction{{end}}</h1>
+  </div>
+  {{if $f.Err}}<div class="error">{{$f.Err}}</div>{{end}}
+  {{if $f.Locked}}<div class="flash">This transaction can no longer be edited: a payment already references its splits.</div>{{end}}
+  <form method="post" action="{{if $f.Editing}}/txns/{{$f.ID}}{{else}}/txns{{end}}">
+    {{template "csrf" $root}}
+    <div class="form-grid">
+      <label>Class
+        <select name="class" {{if $f.Locked}}disabled{{end}}>
+          {{$c := $f.Class}}{{range $f.Classes}}
+          <option value="{{.}}" {{if eq . $c}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Date
+        <input type="date" name="date" value="{{$f.Date}}" required {{if $f.Locked}}disabled{{end}}>
+      </label>
+      <label>Total
+        <input type="text" name="total" value="{{$f.Total}}" required placeholder="0.00" {{if $f.Locked}}disabled{{end}}>
+      </label>
+      <label>Charged currency <span class="muted small">optional</span>
+        <input type="text" name="charged_currency" value="{{$f.ChargedCurrency}}" maxlength="3" placeholder="MYR"
+               style="text-transform:uppercase" {{if $f.Locked}}disabled{{end}}>
+      </label>
+      <label>Amount in charged currency <span class="muted small">optional</span>
+        <input type="text" name="amount_original" value="{{$f.AmountOriginal}}" placeholder="0.00" {{if $f.Locked}}disabled{{end}}>
+      </label>
+      <label>Merchant
+        <select name="merchant_id" {{if $f.Locked}}disabled{{end}}>
+          <option value="">— none —</option>
+          {{$m := $f.MerchantID}}{{range $f.Merchants}}
+          <option value="{{.ID}}" {{if eq .ID $m}}selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Category
+        <select name="category_id" {{if $f.Locked}}disabled{{end}}>
+          <option value="">— none —</option>
+          {{$c := $f.CategoryID}}{{range $f.Cats}}
+          <option value="{{.ID}}" {{if eq .ID $c}}selected{{end}}>{{if .Parent}}({{.Parent}}) {{end}}{{.Name}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Description
+        <input type="text" name="description" value="{{$f.Description}}" placeholder="What was this?" {{if $f.Locked}}disabled{{end}}>
+      </label>
+      <label>Origin — where the money comes from
+        <select name="origin_ref" required {{if $f.Locked}}disabled{{end}}>
+          <option value="">— choose —</option>
+          {{$sel := $f.OriginSel.Selected}}
+          <optgroup label="Accounts">
+            {{range $f.OriginSel.Accounts}}<option value="account:{{.ID}}" {{if eq (printf "account:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
+          </optgroup>
+          <optgroup label="Merchants (income from)">
+            {{range $f.OriginSel.Merchants}}<option value="merchant:{{.ID}}" {{if eq (printf "merchant:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
+          </optgroup>
+          <optgroup label="Counterparties (from)">
+            {{range $f.OriginSel.CPs}}<option value="counterparty:{{.ID}}" {{if eq (printf "counterparty:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
+          </optgroup>
+        </select>
+      </label>
+      <label>Destination — where it goes
+        <select name="destination_ref" required {{if $f.Locked}}disabled{{end}}>
+          <option value="">— choose —</option>
+          {{$sel := $f.DestSel.Selected}}
+          <optgroup label="Accounts">
+            {{range $f.DestSel.Accounts}}<option value="account:{{.ID}}" {{if eq (printf "account:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
+          </optgroup>
+          <optgroup label="Merchants (spent at)">
+            {{range $f.DestSel.Merchants}}<option value="merchant:{{.ID}}" {{if eq (printf "merchant:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
+          </optgroup>
+          <optgroup label="Counterparties (owed to)">
+            {{range $f.DestSel.CPs}}<option value="counterparty:{{.ID}}" {{if eq (printf "counterparty:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
+          </optgroup>
+        </select>
+      </label>
+    </div>
+
+    <h2>Split</h2>
+    <p class="muted small">How the total is divided between people. <b>Equal</b> splits it evenly;
+      <b>Percent</b> must add up to 100%; <b>Amount</b> must add up to the total exactly.
+      Rounding (equal / percent) is handled for you so shares always sum to the total.</p>
+    <label class="checkline"><input type="radio" name="split_mode" value="equal" {{if eq $f.Mode "equal"}}checked{{end}}> Equal split</label>
+    <label class="checkline"><input type="radio" name="split_mode" value="percent" {{if eq $f.Mode "percent"}}checked{{end}}> Percentages</label>
+    <label class="checkline"><input type="radio" name="split_mode" value="amount" {{if eq $f.Mode "amount"}}checked{{end}}> Exact amounts</label>
+    <p class="muted small">Percentages must add up to exactly 100% (rounding slack of 0.0001% is tolerated). In amount mode, the server re-validates the sum.</p>
+
+    <table id="split-table">
+      <tr><th>Participant</th><th class="money">Share</th><th></th></tr>
+      {{range $i, $row := $f.Rows}}
+      <tr>
+        <td>
+          <select name="part_key[]" data-partkey {{if $row.Key}}data-key="{{ $row.Key }}"{{end}}>
+            <option value="">— not included —</option>
+            <optgroup label="Household">
+              {{$k := $row.Key}}{{range $.F.Users}}<option value="user:{{.ID}}" {{if eq (printf "user:%d" .ID) $k}}selected{{end}}>{{.Name}}</option>{{end}}
+            </optgroup>
+            <optgroup label="Counterparties">
+              {{$k := $row.Key}}{{range $.F.CPs}}<option value="cp:{{.ID}}" {{if eq (printf "cp:%d" .ID) $k}}selected{{end}}>{{.Name}}</option>{{end}}
+            </optgroup>
+          </select>
+        </td>
+        <td class="money">
+          <input type="text" name="part_value[]" class="share-input" value="{{$row.Value}}"
+                 data-share placeholder="0.00" {{if eq $.F.Mode "equal"}}disabled{{end}}>
+        </td>
+        <td class="row-actions">
+          <button type="button" class="btn btn-danger small" data-rmrow {{if eq $i 0}}disabled{{end}}>✕</button>
+        </td>
+      </tr>
+      {{end}}
+    </table>
+    <button type="button" class="btn small" data-addrow>＋ Add participant</button>
+    <p id="share-sum" class="muted small"
+       data-total="{{if $f.Total}}{{$f.Total}}{{end}}"
+       data-sum="{{if $f.ShareSum}}{{$f.ShareSum}}{{end}}"></p>
+    <p class="muted small" id="equal-hint" style="display:none"></p>
+
+    <label>Notes <span class="muted small">optional</span>
+      <input type="text" name="notes" value="{{$f.Notes}}" {{if $f.Locked}}disabled{{end}}>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn-primary" {{if $f.Locked}}disabled{{end}}>
+        {{if $f.Editing}}Save changes{{else}}Add transaction{{end}}
+      </button>
+      <a class="btn" href="{{if $f.Editing}}/txns/{{$f.ID}}{{else}}/txns{{end}}">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+// Split editor: per-mode inputs, add/remove rows, live sum check for
+// amount mode (the server re-validates everything — this is UX only).
+document.addEventListener('alpine:init', () => {});
+(function () {
+  const form = document.querySelector('form');
+  if (!form) return;
+  const table = document.getElementById('split-table');
+  const addBtn = form.querySelector('[data-addrow]');
+  const sumEl = document.getElementById('share-sum');
+  const hintEl = document.getElementById('equal-hint');
+
+  function mode() {
+    const r = form.querySelector('input[name="split_mode"]:checked');
+    return r ? r.value : 'equal';
+  }
+  function parseMoney(s) {
+    s = (s || '').trim().replace(/^RM\s*/i, '').replace(/,/g, '');
+    const n = parseFloat(s);
+    return isNaN(n) ? null : Math.round(n * 100);
+  }
+  function rows() { return table.querySelectorAll('tr[data-partkey], tr:has(select[data-partkey])'); }
+  function activeRows() {
+    return Array.from(table.querySelectorAll('select[data-partkey]'))
+      .filter(s => s.value !== '');
+  }
+  function update() {
+    const m = mode();
+    form.querySelectorAll('.share-input').forEach(inp => {
+      inp.disabled = (m === 'equal');
+    });
+    if (m === 'equal') {
+      const n = activeRows().length;
+      const total = parseMoney(sumEl.dataset.total || '');
+      if (n > 0 && total !== null) {
+        const base = Math.floor(total / n);
+        hintEl.style.display = '';
+        hintEl.textContent = 'Equal shares: ' + (base / 100).toFixed(2) +
+          ' each (leftover cents go to the first people, ' + (total % n) + ' cent(s)).';
+        sumEl.textContent = '';
+      } else {
+        hintEl.style.display = 'none';
+      }
+      return;
+    }
+    hintEl.style.display = 'none';
+    const sel = activeRows();
+    let bad = '';
+    if (m === 'percent') {
+      let sumP = 0;
+      for (const s of sel) {
+        const v = parseFloat(s.closest('tr').querySelector('.share-input').value);
+        if (isNaN(v)) { bad = 'Every included participant needs a percentage.'; break; }
+        sumP += v;
+      }
+      if (!bad) {
+        const last = sel[sel.length - 1];
+        if (Math.abs(sumP - 100) <= 0.01) {
+          bad = '';
+        } else {
+          const diff = 100 - sumP;
+          bad = 'Percentages must add up to exactly 100%. Currently ' +
+            sumP.toFixed(2) + '% — off by ' + (diff >= 0 ? '+' : '') + diff.toFixed(2) + '%.';
+        }
+      }
+      sumEl.textContent = bad;
+    } else { // amount
+      let sumC = 0;
+      const total = parseMoney(sumEl.dataset.total || '');
+      for (const s of sel) {
+        const c = parseMoney(s.closest('tr').querySelector('.share-input').value);
+        if (c === null) { bad = 'Every included participant needs an amount.'; break; }
+        sumC += c;
+      }
+      if (!bad && total !== null) {
+        if (sumC === total) {
+          bad = '';
+        } else {
+          const diff = (total - sumC) / 100;
+          bad = 'Amounts must add up to the total exactly. Currently off by ' +
+            (diff >= 0 ? '+' : '') + diff.toFixed(2) + '.';
+        }
+      }
+      sumEl.textContent = bad;
+    }
+  }
+
+  form.addEventListener('change', update);
+  form.addEventListener('input', update);
+  addBtn.addEventListener('click', () => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><select name="part_key[]" data-partkey>
+        <option value="">— not included —</option>
+        <optgroup label="Household"></optgroup>
+        <optgroup label="Counterparties"></optgroup>
+      </select></td>
+      <td class="money"><input type="text" name="part_value[]" class="share-input" data-share placeholder="0.00"></td>
+      <td class="row-actions"><button type="button" class="btn btn-danger small" data-rmrow>✕</button></td>`;
+    // Copy options from the first row's selects.
+    const src = table.querySelector('select[data-partkey]');
+    if (src) {
+      const dst = tr.querySelector('select[data-partkey]');
+      dst.querySelectorAll('optgroup').forEach(og => {
+        const sog = src.querySelector('optgroup[label="' + og.label + '"]');
+        if (sog) og.innerHTML = sog.innerHTML;
+      });
+    }
+    tr.querySelector('[data-rmrow]').addEventListener('click', () => { tr.remove(); update(); });
+    table.appendChild(tr);
+    update();
+  });
+  table.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-rmrow]');
+    if (btn && !btn.disabled) { btn.closest('tr').remove(); update(); }
+  });
+  update();
+})();
+</script>
+{{end}}

@@ -1,0 +1,61 @@
+{{define "page/txns"}}
+{{$root := .}}
+{{$f := .F}}
+<div class="card">
+  <div class="page-head">
+    <h1>Transactions</h1>
+    <a class="btn-primary" href="/txns/new">＋ New transaction</a>
+  </div>
+
+  <form method="get" action="/txns" class="filter-bar">
+    <input type="text" name="q" value="{{$f.Q}}" placeholder="Search description / merchant">
+    <label>From <input type="date" name="from" value="{{$f.From}}"></label>
+    <label>To <input type="date" name="to" value="{{$f.To}}"></label>
+    <label>Class
+      <select name="class">
+        <option value="">all</option>
+        {{range .Classes}}<option value="{{.}}" {{if eq . $f.Class}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+    <label>Status
+      <select name="status">
+        <option value="">all</option>
+        {{range .Statuses}}<option value="{{.}}" {{if eq . $f.Status}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+    <label>Category
+      <select name="category">
+        <option value="">all</option>
+        {{range .Cats}}<option value="{{.ID}}" {{if eq .ID $f.CategoryID}}selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <label>Account
+      <select name="account">
+        <option value="">all</option>
+        {{range .Accts}}<option value="{{.ID}}" {{if eq .ID $f.AccountID}}selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <button type="submit" class="btn">Filter</button>
+    <a class="btn" href="/txns">Clear</a>
+  </form>
+
+  {{if .List}}
+  <table>
+    <tr><th>Date</th><th>What</th><th>Category</th><th class="money">Amount</th><th>Flow</th><th>Status</th><th></th></tr>
+    {{range .List}}
+    <tr class="{{if eq .Status "void"}}inactive{{end}}">
+      <td>{{date .Date}}</td>
+      <td><a href="/txns/{{.ID}}">{{.Label}}{{if .Original}}<br><span class="muted small">{{.Original}}</span>{{end}}</a></td>
+      <td>{{orDash .Category}}</td>
+      <td class="money">{{money .Total}}</td>
+      <td>{{orDash .FromTo}}</td>
+      <td><span class="tag">{{.Status}}</span></td>
+      <td class="row-actions"><a class="btn small" href="/txns/{{.ID}}">Open</a></td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p>No transactions match. <a href="/txns/new">Add the first one</a>.</p>
+  {{end}}
+</div>
+{{end}}

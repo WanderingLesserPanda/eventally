@@ -77,3 +77,16 @@ th.money { text-align: right; }
 .tag.approved { background: #e5f5ec; color: var(--ok); }
 .tag.void { background: #f2f2f2; color: #999; text-decoration: line-through; }
 .footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 2rem 0; }
+
+/* P3: transactions */
+.filter-bar {
+  display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end;
+  border-bottom: 1px solid var(--line); padding-bottom: 0.9rem; margin-bottom: 1rem;
+}
+.filter-bar input, .filter-bar select { width: auto; margin-top: 0; }
+.filter-bar label { margin-bottom: 0; display: flex; flex-direction: column; font-weight: 600; }
+.filter-bar input[type=text] { min-width: 200px; }
+table.kv th { text-align: left; width: 180px; font-size: 0.8rem; color: var(--muted); }
+tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
+.inline-form { display: inline-flex; gap: 0.6rem; align-items: center; }
+.inline-form input[type=file] { width: auto; display: inline-block; }

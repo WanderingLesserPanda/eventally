@@ -21,10 +21,11 @@ type App struct {
 	Pool     *pgxpool.Pool
 	Sessions *auth.Store
 	Tmpl     *template.Template
+	DataDir  string // where uploaded receipts and other user files are stored
 }
 
 // New loads templates and returns a ready App.
-func New(pool *pgxpool.Pool, tmplDir string) (*App, error) {
+func New(pool *pgxpool.Pool, tmplDir, dataDir string) (*App, error) {
 	funcs := template.FuncMap{
 		"money": moneyFmt,
 		"date":  dateFmt,
@@ -38,7 +39,7 @@ func New(pool *pgxpool.Pool, tmplDir string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{Pool: pool, Sessions: auth.NewStore(pool), Tmpl: tmpl}, nil
+	return &App{Pool: pool, Sessions: auth.NewStore(pool), Tmpl: tmpl, DataDir: dataDir}, nil
 }
 
 // Router builds the chi mux with middleware and all routes.
@@ -51,6 +52,10 @@ func (a *App) Router() http.Handler {
 	r.Use(a.sessionLoader)
 
 	r.Get("/static/*", http.StripPrefix("/static/", http.FileServerFS(staticFS)).ServeHTTP)
+
+	// Phase P3: receipts are served by direct link (D14) — unauthenticated,
+	// home-LAN only, unguessable filename (timestamp-suffixed).
+	r.Get("/receipts/*", a.serveReceipts)
 
 	r.Get("/login", a.handleLogin)
 	r.Post("/login", a.handleLoginPost)
@@ -93,6 +98,17 @@ func (a *App) Router() http.Handler {
 		authed.Get("/counterparties/{id}", a.handleCounterpartyEdit)
 		authed.Post("/counterparties/{id}", a.handleCounterpartyEdit)
 		authed.Post("/counterparties/{id}/deactivate", a.handleCounterpartyDelete)
+
+		// Phase P3: transactions (list, form w/ split editor, detail, status, receipts).
+		authed.Get("/txns", a.listTxns)
+		authed.Get("/txns/new", a.handleTxnCreate)
+		authed.Post("/txns", a.handleTxnCreate)
+		authed.Get("/txns/{id}", a.handleTxnDetail)
+		authed.Get("/txns/{id}/edit", a.handleTxnEdit)
+		authed.Post("/txns/{id}", a.handleTxnEditPost)
+		authed.Post("/txns/{id}/status", a.handleTxnStatus)
+		authed.Post("/txns/{id}/receipt", a.handleTxnReceiptUpload)
+		authed.Post("/txns/{id}/receipt/delete", a.handleTxnReceiptDelete)
 	})
 
 	return r
