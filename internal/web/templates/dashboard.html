@@ -1,0 +1,18 @@
+{{define "content"}}
+<h1>Dashboard</h1>
+<p class="muted">Signed in. The card grid (spend by category, card balances, outstanding per person, pending review, budget vs actual) arrives in the reconciliation phase.</p>
+<div class="grid">
+  <div class="card stat">
+    <div class="stat-label">Accounts</div>
+    <div class="stat-value">{{.Stats.Accounts}}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Transactions</div>
+    <div class="stat-value">{{.Stats.Txns}}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Pending review</div>
+    <div class="stat-value">{{.Stats.Pending}}</div>
+  </div>
+</div>
+{{end}}

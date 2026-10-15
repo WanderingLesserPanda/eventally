@@ -1,0 +1,20 @@
+# Binaries & build
+bin/
+*.exe
+dist/
+
+# Env
+.env
+
+# Go
+vendor/
+
+# Data (receipts, dev artifacts)
+data/
+
+# Agent working scratch (plans, session notes — not project content)
+.hermes/
+
+# OS / editor
+.DS_Store
+*.swp

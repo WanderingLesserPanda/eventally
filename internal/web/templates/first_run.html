@@ -1,0 +1,20 @@
+{{define "content"}}
+<div class="card auth-card">
+  <h1>Welcome to Eventally</h1>
+  <p class="muted">Set up your household to get started. This takes a minute.</p>
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+  <form method="post" action="/setup">
+    <label>Household name
+      <input type="text" name="household" required placeholder="e.g. Our Home" autofocus>
+    </label>
+    <label>Your username
+      <input type="text" name="username" required autocomplete="username">
+    </label>
+    <label>Your password
+      <input type="password" name="password" required minlength="8" autocomplete="new-password">
+    </label>
+    <p class="muted small">Base currency defaults to MYR — change it later in Settings. Add your partner from Settings → People.</p>
+    <button type="submit" class="btn-primary">Create household</button>
+  </form>
+</div>
+{{end}}

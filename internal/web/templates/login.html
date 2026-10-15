@@ -1,0 +1,16 @@
+{{define "content"}}
+<div class="card auth-card">
+  <h1>Eventally</h1>
+  <p class="muted">Sign in to your household ledger</p>
+  {{if .Error}}<div class="error">Invalid username or password.</div>{{end}}
+  <form method="post" action="/login">
+    <label>Username
+      <input type="text" name="username" required autofocus autocomplete="username">
+    </label>
+    <label>Password
+      <input type="password" name="password" required autocomplete="current-password">
+    </label>
+    <button type="submit" class="btn-primary">Sign in</button>
+  </form>
+</div>
+{{end}}

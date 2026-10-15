@@ -1,0 +1,47 @@
+# Eventally — self-hosted household ledger.
+#
+# On TrueNAS / any docker host:
+#   cp .env.example .env   # then edit values
+#   docker compose up -d
+#
+# First visit: http://<host>:8090  -> the first-run setup page creates
+# the household and the first user.
+#
+# NOTE: EVENTALLY_SECRET must be 64 hex chars (openssl rand -hex 32).
+# It signs the session cookies; without it the app refuses to start.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eventally
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: eventally
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventally -d eventally"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      EVENTALLY_ADDR: ":8090"
+      EVENTALLY_DSN: "postgres://eventally:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/eventally?sslmode=disable"
+      EVENTALLY_SECRET: ${EVENTALLY_SECRET:?set EVENTALLY_SECRET (64 hex) in .env}
+      EVENTALLY_DATA_DIR: "/data"
+    volumes:
+      - receipts:/data
+    ports:
+      - "8090:8090"
+
+volumes:
+  pgdata:
+  receipts:

@@ -1,0 +1,39 @@
+{{define "layout.html"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Eventally</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js" defer></script>
+<script src="/static/alpine.min.js" defer></script>
+</head>
+<body>
+{{if .Session}}
+<header class="topbar">
+  <a class="brand" href="/">Eventally</a>
+  <nav>
+    <a href="/" class="{{if eq .Path "/"}}active{{end}}">Dashboard</a>
+    <a href="/txns">Transactions</a>
+    <a href="/cards">Cards</a>
+    <a href="/reconcile">Reconcile</a>
+    <a href="/recurring">Recurring</a>
+    <a href="/settings">Settings</a>
+  </nav>
+  <div class="user">
+    <form method="post" action="/logout" style="display:inline">{{template "csrf" .}}<button class="btn-link">Sign out</button></form>
+  </div>
+</header>
+{{end}}
+<main class="container">
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+{{template "content" .}}
+</main>
+<footer class="footer">Eventally — self-hosted household ledger</footer>
+</body>
+</html>
+{{end}}
+
+{{define "csrf"}}
+{{if .Session}}<input type="hidden" name="csrf" value="{{.Session.CSRFToken}}">{{end}}
+{{end}}
