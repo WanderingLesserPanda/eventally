@@ -23,6 +23,16 @@ a { color: var(--accent); text-decoration: none; }
 .topbar nav { display: flex; gap: 1rem; flex: 1; flex-wrap: wrap; }
 .topbar nav a { color: var(--muted); padding: 0.2rem 0; }
 .topbar nav a.active, .topbar nav a:hover { color: var(--ink); }
+.topbar .nav-sub { display: flex; gap: 1rem; flex: 1; flex-wrap: wrap; }
+.topbar .nav-sub a { font-size: 0.82rem; }
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.8rem; }
+.page-head h1 { margin-bottom: 0; }
+tr.inactive td { opacity: 0.55; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 1rem; }
+.form-actions { display: flex; gap: 0.8rem; margin-top: 1rem; }
+label.checkline { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; margin-bottom: 1rem; }
+label.checkline input { width: auto; margin: 0 0.3rem 0 0; }
+.row-actions { display: flex; gap: 0.4rem; justify-content: flex-end; white-space: nowrap; }
 .topbar .user { display: flex; align-items: center; gap: 0.6rem; color: var(--muted); }
 .container { max-width: 1080px; margin: 1.4rem auto; padding: 0 1rem; }
 .card {

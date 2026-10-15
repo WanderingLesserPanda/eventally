@@ -1,0 +1,57 @@
+{{define "page/reference_account_form"}}
+<div class="card">
+  <h1>{{if .Editing}}Edit account{{else}}New account{{end}}</h1>
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  <form method="post" action="{{if .Editing}}/accounts/{{.F.ID}}{{else}}/accounts{{end}}">
+    {{template "csrf" .}}
+    <div class="form-grid">
+      <label>Name *
+        <input type="text" name="name" value="{{.F.Name}}" required>
+      </label>
+      <label>Institution
+        <input type="text" name="institution" value="{{.F.Institution}}" placeholder="e.g. Maybank, UOB">
+      </label>
+      <label>Type *
+        <select name="account_type" required>
+          {{range $i, $t := .Types}}<option value="{{$t}}" {{if eq $.F.Type $t}}selected{{end}}>{{$t}}</option>{{end}}
+        </select>
+      </label>
+      <label>Balance *
+        <select name="balance_type" required>
+          <option value="asset" {{if eq .F.BalanceType "asset"}}selected{{end}}>asset (money in)</option>
+          <option value="liability" {{if eq .F.BalanceType "liability"}}selected{{end}}>liability (money owed)</option>
+        </select>
+      </label>
+      <label>Card type <span class="muted small">(credit cards only)</span>
+        <select name="card_type">
+          <option value="">—</option>
+          <option value="principal" {{if eq .F.CardType "principal"}}selected{{end}}>principal</option>
+          <option value="supplementary" {{if eq .F.CardType "supplementary"}}selected{{end}}>supplementary</option>
+        </select>
+      </label>
+      <label>Credit limit
+        <input type="text" name="credit_limit" value="{{if .F.HasCreditLim}}{{.F.CreditLimit}}{{end}}" placeholder="10000">
+      </label>
+      <label>Statement day <span class="muted small">(1–31)</span>
+        <input type="number" name="statement_day" min="1" max="31" value="{{if .F.HasStmtDay}}{{.F.StatementDay}}{{end}}">
+      </label>
+      <label>Payment due day <span class="muted small">(1–31)</span>
+        <input type="number" name="payment_due_day" min="1" max="31" value="{{if .F.HasPayDue}}{{.F.PaymentDue}}{{end}}">
+      </label>
+      <label>Opening balance
+        <input type="text" name="opening_balance" value="{{if .F.Opening}}{{.F.Opening}}{{end}}" placeholder="0.00">
+      </label>
+      <label>Opening balance date
+        <input type="date" name="opening_date" value="{{.F.OpeningDate}}">
+      </label>
+    </div>
+    <label>Notes
+      <textarea name="notes" rows="2">{{.F.Notes}}</textarea>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">{{if .Editing}}Save{{else}}Create{{end}}</button>
+      <a class="btn" href="/accounts">Cancel</a>
+    </div>
+  </form>
+</div>
+{{end}}

@@ -1,0 +1,30 @@
+{{define "page/reference_merchant_form"}}
+<div class="card">
+  <h1>{{if .Editing}}Edit merchant{{else}}New merchant{{end}}</h1>
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  <form method="post" action="{{if .Editing}}/merchants/{{.F.ID}}{{else}}/merchants{{end}}">
+    {{template "csrf" .}}
+    <div class="form-grid">
+      <label>Name *
+        <input type="text" name="name" value="{{.F.Name}}" required>
+      </label>
+      <label>Default category
+        <select name="category_id">
+          <option value="">— none —</option>
+          {{range .F.CategoryOptions}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $.F.CategoryID)}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <label>Country
+        <input type="text" name="country" value="{{.F.Country}}" placeholder="MY">
+      </label>
+    </div>
+    <label>Notes
+      <textarea name="notes" rows="2">{{.F.Notes}}</textarea>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">{{if .Editing}}Save{{else}}Create{{end}}</button>
+      <a class="btn" href="/merchants">Cancel</a>
+    </div>
+  </form>
+</div>
+{{end}}

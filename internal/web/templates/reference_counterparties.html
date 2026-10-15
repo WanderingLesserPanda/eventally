@@ -1,0 +1,33 @@
+{{define "page/reference_counterparties"}}
+<div class="card">
+  <div class="page-head">
+    <h1>Counterparties</h1>
+    <a class="btn-primary" href="/counterparties/new">＋ New counterparty</a>
+  </div>
+  <p class="muted small">People or organisations outside the household that money moves to/from — used in splits.</p>
+  {{if .List}}
+  {{$root := .}}
+  <table>
+    <tr><th>Name</th><th>Type</th><th>Relationship</th><th></th></tr>
+    {{range .List}}
+    <tr class="{{if not .Active}}inactive{{end}}">
+      <td><a href="/counterparties/{{.ID}}">{{.Name}}</a>
+        {{if not .Active}}<span class="tag">inactive</span>{{end}}</td>
+      <td><span class="tag">{{.Type}}</span></td>
+      <td>{{orDash .Relationship}}</td>
+      <td class="row-actions">
+        <a class="btn small" href="/counterparties/{{.ID}}">Edit</a>
+        <form method="post" action="/counterparties/{{.ID}}/deactivate" style="display:inline"
+              onsubmit="return confirm('Deactivate {{.Name}}? It stays in history.')">
+          {{template "csrf" $root}}
+          <button class="btn btn-danger small">Deactivate</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p>No counterparties yet.</p>
+  {{end}}
+</div>
+{{end}}

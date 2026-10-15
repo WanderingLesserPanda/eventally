@@ -31,6 +31,8 @@ func New(pool *pgxpool.Pool, tmplDir string) (*App, error) {
 		"now":   time.Now,
 		"csrf":  func(r *http.Request) string { return csrfToken(r) },
 		"add":   func(a, b int) int { return a + b },
+		"orDash": orDash,
+		"hasPrefix": hasPrefix,
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseGlob(filepath.Join(tmplDir, "*.html"))
 	if err != nil {
@@ -60,8 +62,37 @@ func (a *App) Router() http.Handler {
 	// reconciliation, recurring, settings mount under this group.
 	r.Group(func(authed chi.Router) {
 		authed.Use(a.requireAuth)
+		authed.Use(a.requireCSRF)
 		authed.Get("/", a.handleDashboard)
-		// Phase P2+ routes attach here.
+
+		// Phase P2: reference data CRUD.
+		authed.Get("/accounts", a.listAccounts)
+		authed.Get("/accounts/new", a.handleAccountCreate)
+		authed.Post("/accounts", a.handleAccountCreate)
+		authed.Get("/accounts/{id}", a.handleAccountEdit)
+		authed.Post("/accounts/{id}", a.handleAccountEdit)
+		authed.Post("/accounts/{id}/deactivate", a.handleAccountDelete)
+
+		authed.Get("/categories", a.listCategories)
+		authed.Get("/categories/new", a.handleCategoryCreate)
+		authed.Post("/categories", a.handleCategoryCreate)
+		authed.Get("/categories/{id}", a.handleCategoryEdit)
+		authed.Post("/categories/{id}", a.handleCategoryEdit)
+		authed.Post("/categories/{id}/deactivate", a.handleCategoryDelete)
+
+		authed.Get("/merchants", a.listMerchants)
+		authed.Get("/merchants/new", a.handleMerchantCreate)
+		authed.Post("/merchants", a.handleMerchantCreate)
+		authed.Get("/merchants/{id}", a.handleMerchantEdit)
+		authed.Post("/merchants/{id}", a.handleMerchantEdit)
+		authed.Post("/merchants/{id}/deactivate", a.handleMerchantDelete)
+
+		authed.Get("/counterparties", a.listCounterparties)
+		authed.Get("/counterparties/new", a.handleCounterpartyCreate)
+		authed.Post("/counterparties", a.handleCounterpartyCreate)
+		authed.Get("/counterparties/{id}", a.handleCounterpartyEdit)
+		authed.Post("/counterparties/{id}", a.handleCounterpartyEdit)
+		authed.Post("/counterparties/{id}/deactivate", a.handleCounterpartyDelete)
 	})
 
 	return r
@@ -86,6 +117,21 @@ func (a *App) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if sessionFromContext(r.Context()) == nil {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requireCSRF rejects authenticated POSTs without a valid csrf field.
+func (a *App) requireCSRF(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if err := a.checkCSRF(r); err != nil {
+			http.Error(w, "CSRF check failed", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -1,0 +1,32 @@
+{{define "page/reference_categories"}}
+<div class="card">
+  <div class="page-head">
+    <h1>Categories</h1>
+    <a class="btn-primary" href="/categories/new">＋ New category</a>
+  </div>
+  {{if .List}}
+  {{$root := .}}
+  <table>
+    <tr><th>Name</th><th>Class</th><th>Budget / month</th><th></th></tr>
+    {{range .List}}
+    <tr class="{{if not .Active}}inactive{{end}}">
+      <td>{{if .ParentName}}<span class="muted small">{{.ParentName}} ›</span> {{end}}<a href="/categories/{{.ID}}">{{.Name}}</a>
+        {{if not .Active}}<span class="tag">inactive</span>{{end}}</td>
+      <td><span class="tag">{{.Class}}</span></td>
+      <td class="money">{{if .HasBudget}}{{money .Budget}}{{else}}—{{end}}</td>
+      <td class="row-actions">
+        <a class="btn small" href="/categories/{{.ID}}">Edit</a>
+        <form method="post" action="/categories/{{.ID}}/deactivate" style="display:inline"
+              onsubmit="return confirm('Deactivate {{.Name}}? It stays in history.')">
+          {{template "csrf" $root}}
+          <button class="btn btn-danger small">Deactivate</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p>No categories yet — create a few before recording transactions.</p>
+  {{end}}
+</div>
+{{end}}

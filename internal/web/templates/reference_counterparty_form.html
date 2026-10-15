@@ -1,0 +1,29 @@
+{{define "page/reference_counterparty_form"}}
+<div class="card">
+  <h1>{{if .Editing}}Edit counterparty{{else}}New counterparty{{end}}</h1>
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  <form method="post" action="{{if .Editing}}/counterparties/{{.F.ID}}{{else}}/counterparties{{end}}">
+    {{template "csrf" .}}
+    <div class="form-grid">
+      <label>Name *
+        <input type="text" name="name" value="{{.F.Name}}" required>
+      </label>
+      <label>Type *
+        <select name="type" required>
+          {{range .Types}}<option value="{{.}}" {{if eq $.F.Type .}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </label>
+      <label>Relationship <span class="muted small">(optional)</span>
+        <input type="text" name="relationship" value="{{.F.Relationship}}" placeholder="e.g. landlord, friend">
+      </label>
+    </div>
+    <label>Notes
+      <textarea name="notes" rows="2">{{.F.Notes}}</textarea>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">{{if .Editing}}Save{{else}}Create{{end}}</button>
+      <a class="btn" href="/counterparties">Cancel</a>
+    </div>
+  </form>
+</div>
+{{end}}

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"fmt"
@@ -75,6 +76,15 @@ func (a *App) render(w http.ResponseWriter, r *http.Request, status int, name st
 	data["Year"] = time.Now().Year()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
+	// Two-stage render: execute the page template into a buffer, then the
+	// layout with the page HTML as .Content (safeHTML skips escaping).
+	var buf bytes.Buffer
+	pageName := "page/" + strings.TrimSuffix(name, ".html")
+	if err := a.Tmpl.ExecuteTemplate(&buf, pageName, data); err != nil {
+		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data["Content"] = template.HTML(buf.String())
 	if err := a.Tmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
 		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
 	}
@@ -92,5 +102,7 @@ func dateFmt(t time.Time) string {
 	return t.Format("2 Jan 2006")
 }
 
-// hasPrefix is a tiny strings.HasPrefix alias for template funcs.
-var _ = strings.HasPrefix
+// hasPrefix is a strings.HasPrefix alias for template funcs.
+func hasPrefix(s, prefix string) bool {
+	return strings.HasPrefix(s, prefix)
+}

@@ -1,0 +1,33 @@
+{{define "page/reference_category_form"}}
+<div class="card">
+  <h1>{{if .Editing}}Edit category{{else}}New category{{end}}</h1>
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  <form method="post" action="{{if .Editing}}/categories/{{.F.ID}}{{else}}/categories{{end}}">
+    {{template "csrf" .}}
+    <div class="form-grid">
+      <label>Name *
+        <input type="text" name="name" value="{{.F.Name}}" required>
+      </label>
+      <label>Class *
+        <select name="transaction_class" required>
+          {{range .Classes}}<option value="{{.}}" {{if eq $.F.Class .}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </label>
+      <label>Parent <span class="muted small">(optional, one level)</span>
+        <select name="parent_id">
+          <option value="">— top level —</option>
+          {{range .F.ParentOptions}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $.F.ParentID)}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <label>Monthly budget <span class="muted small">(optional)</span>
+        <input type="text" name="budget" value="{{if .F.HasBudget}}{{.F.Budget}}{{end}}" placeholder="1500">
+      </label>
+    </div>
+    <label class="checkline"><input type="checkbox" name="budgetable" {{if .F.Budgetable}}checked{{end}}> Counted in budget reports</label>
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">{{if .Editing}}Save{{else}}Create{{end}}</button>
+      <a class="btn" href="/categories">Cancel</a>
+    </div>
+  </form>
+</div>
+{{end}}
