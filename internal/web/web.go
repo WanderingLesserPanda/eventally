@@ -127,6 +127,16 @@ func (a *App) Router() http.Handler {
 		authed.Get("/reconcile", a.handleReconcile)
 		authed.Get("/reconcile/{id}/{month}", a.handleReconcileMonth)
 		authed.Post("/reconcile/{id}/{month}", a.handleReconcileMonthPost)
+
+		// Phase P7: recurring templates (D11) + pending-review queue (D9).
+		authed.Get("/recurring", a.handleRecurring)
+		authed.Get("/recurring/new", a.handleRecurringCreate)
+		authed.Post("/recurring", a.handleRecurringCreate)
+		authed.Get("/recurring/{id}", a.handleRecurringEdit)
+		authed.Post("/recurring/{id}", a.handleRecurringEdit)
+		authed.Post("/recurring/{id}/deactivate", a.handleRecurringDeactivate)
+		authed.Get("/review", a.handleReview)
+		authed.Post("/review/bulk", a.handleReviewBulk)
 	})
 
 	return r

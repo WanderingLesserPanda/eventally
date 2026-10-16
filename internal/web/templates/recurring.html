@@ -1,0 +1,42 @@
+{{define "page/recurring"}}
+{{$root := .}}
+<div class="card">
+  <div class="page-head">
+    <h1>Recurring</h1>
+    <a class="btn-primary" href="/recurring/new">＋ New template</a>
+  </div>
+  <p class="muted small">Monthly charges. Each active template creates one
+  <strong>pending</strong> transaction on its day of the month (the first
+  page load after that day, if the server was down). Review them on the
+  <a href="/review">review queue</a>.</p>
+  {{if .List}}
+  <table>
+    <tr><th>Name</th><th>Amount</th><th>Day</th><th>Lands on</th><th>Merchant</th><th>Category</th><th>Split between</th><th>Last generated</th><th></th></tr>
+    {{range .List}}
+    <tr class="{{if not .Active}}inactive{{end}}">
+      <td><a href="/recurring/{{.ID}}">{{.Name}}</a>
+        {{if not .Active}}<span class="tag">stopped</span>{{end}}</td>
+      <td class="money">{{money .Amount}}</td>
+      <td>{{.DayOfMonth}}</td>
+      <td>{{.Account}}</td>
+      <td>{{orDash .Merchant}}</td>
+      <td>{{orDash .Category}}</td>
+      <td>{{orDash .Participants}}</td>
+      <td>{{if .LastGenerated}}{{date .LastGenerated}}{{else}}—{{end}}</td>
+      <td class="row-actions">
+        <a class="btn small" href="/recurring/{{.ID}}">Edit</a>
+        <form method="post" action="/recurring/{{.ID}}/deactivate" style="display:inline"
+              onsubmit="return confirm('Stop {{.Name}}? Entries already generated are untouched.')">
+          {{template "csrf" $root}}
+          <button class="btn btn-danger small">Stop</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p>No recurring templates yet. Add one for standing charges — rent,
+  subscriptions, insurance.</p>
+  {{end}}
+</div>
+{{end}}

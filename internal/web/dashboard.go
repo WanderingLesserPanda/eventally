@@ -38,6 +38,9 @@ type dashPersonOut struct {
 func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	hh := sessionFromContext(ctx).Household
+	// P7 (D11): catch up recurring templates due this month so the
+	// pending-review count below already includes today's charges.
+	a.generateDueRecurring(ctx, hh, time.Now())
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	monthEnd := monthStart.AddDate(0, 1, 0)

@@ -1,0 +1,73 @@
+{{define "page/recurring_form"}}
+{{$f := .F}}
+<div class="card">
+  <h1>{{if gt .F.ID 0}}Edit template{{else}}New recurring template{{end}}</h1>
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  <form method="post" action="{{if gt .F.ID 0}}/recurring/{{.F.ID}}{{else}}/recurring{{end}}">
+    {{template "csrf" .}}
+    <div class="form-grid">
+      <label>Name *
+        <input type="text" name="name" value="{{$f.Name}}" required placeholder="e.g. Rental">
+      </label>
+      <label>Amount (per month) *
+        <input type="text" name="amount" value="{{$f.Amount}}" required placeholder="1500">
+      </label>
+      <label>Day of month * <span class="muted small">(1–28)</span>
+        <select name="day_of_month" required>
+          {{range .F.DayOptions}}<option value="{{.}}" {{if eq (printf "%d" .) $f.DayOfMonth}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </label>
+      <label>Lands on (account) *
+        <select name="account_id" required>
+          <option value="">— choose —</option>
+          {{range .F.Accounts}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $.F.AccountID)}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <label>Merchant <span class="muted small">(optional)</span>
+        <select name="merchant_id">
+          <option value="">— none —</option>
+          {{range .F.Merchants}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $.F.MerchantID)}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <label>Category <span class="muted small">(optional)</span>
+        <select name="category_id">
+          <option value="">— none —</option>
+          {{range .F.Cats}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $.F.CategoryID)}}selected{{end}}>{{if .Parent}}{{.Parent}} › {{end}}{{.Name}}</option>{{end}}
+        </select>
+      </label>
+    </div>
+
+    <fieldset style="margin-top:1rem">
+      <legend>Split between <span class="muted small">(equal split)</span></legend>
+      {{if .F.Users}}
+      {{range .F.Users}}
+      <label class="checkline">
+        <input type="checkbox" name="part[]" value="user:{{.ID}}"
+               {{if contains $.F.SelectedKeys (printf "user:%d" .ID)}}checked{{end}}>
+        {{.Name}}
+      </label>
+      {{end}}
+      {{end}}
+      {{if .F.CPs}}
+      {{range .F.CPs}}
+      <label class="checkline">
+        <input type="checkbox" name="part[]" value="cp:{{.ID}}"
+               {{if contains $.F.SelectedKeys (printf "cp:%d" .ID)}}checked{{end}}>
+        {{.Name}} <span class="muted small">(counterparty)</span>
+      </label>
+      {{end}}
+      {{end}}
+    </fieldset>
+
+    <label class="checkline" style="margin-top:.75rem">
+      <input type="checkbox" name="active" {{if .F.Active}}checked{{end}}>
+      Active <span class="muted small">(a stopped template generates nothing)</span>
+    </label>
+
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">{{if gt .F.ID 0}}Save{{else}}Create{{end}}</button>
+      <a class="btn" href="/recurring">Cancel</a>
+    </div>
+  </form>
+</div>
+{{end}}

@@ -1,0 +1,39 @@
+{{define "page/review"}}
+{{$root := .}}
+<div class="card">
+  <div class="page-head">
+    <h1>Review pending</h1>
+  </div>
+  <p class="muted small">Entries from quick capture, recurring templates and
+  imports land here until the monthly check. Approve to confirm them, or void
+  to discard. Rows a payment already references are skipped on bulk actions.</p>
+  {{if .List}}
+  <form method="post" action="/review/bulk">
+    {{template "csrf" $root}}
+    <table>
+      <tr><th></th><th>Date</th><th>What</th><th>Category</th><th class="money">Amount</th><th>From</th><th>By</th><th></th></tr>
+      {{range .List}}
+      <tr>
+        <td><input type="checkbox" name="id[]" value="{{.ID}}" class="row-check" checked></td>
+        <td>{{date .Date}}</td>
+        <td><a href="/txns/{{.ID}}">{{.Label}}</a></td>
+        <td>{{orDash .Category}}</td>
+        <td class="money">{{money .Total}}</td>
+        <td><span class="tag">{{.Source}}</span></td>
+        <td>{{orDash .RecordedBy}}</td>
+        <td><a class="btn small" href="/txns/{{.ID}}">Open</a></td>
+      </tr>
+      {{end}}
+    </table>
+    <div class="form-actions">
+      <button type="submit" name="status" value="approved" class="btn-primary">Approve selected</button>
+      <button type="submit" name="status" value="void" class="btn btn-danger"
+              onclick="return confirm('Void the selected transactions?')">Void selected</button>
+      <a class="btn" href="/txns?status=pending">All pending</a>
+    </div>
+  </form>
+  {{else}}
+  <p>Nothing pending — the books are reviewed.</p>
+  {{end}}
+</div>
+{{end}}
