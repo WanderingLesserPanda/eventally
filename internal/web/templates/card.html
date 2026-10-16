@@ -1,0 +1,131 @@
+{{define "page/card"}}
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>{{.C.Name}} {{if .C.Institution}}<span class="muted">· {{.C.Institution}}</span>{{end}}</h1>
+      {{if .C.CardType}}<span class="tag">{{.C.CardType}}</span>{{end}}
+    </div>
+    <a class="btn btn-primary" href="/cards/{{.C.ID}}/pay">Record payment</a>
+  </div>
+
+  <div class="grid">
+    <div class="stat card">
+      <div class="stat-label">Outstanding</div>
+      <div class="stat-value">{{money .C.Outstanding}}</div>
+    </div>
+    <div class="stat card">
+      <div class="stat-label">Recorded balance</div>
+      <div class="stat-value">{{money .C.Recorded}}</div>
+    </div>
+    {{if gt .C.CreditLimit 0}}
+    <div class="stat card">
+      <div class="stat-label">Credit limit</div>
+      <div class="stat-value">{{money .C.CreditLimit}}</div>
+    </div>
+    {{end}}
+  </div>
+
+  <h2>Outstanding by person</h2>
+  {{if .C.People}}
+  <table>
+    <thead>
+      <tr>
+        <th>Person</th>
+        <th class="money">Total spend</th>
+        <th class="money">Outstanding</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .C.People}}
+      <tr>
+        <td>{{.Person}}</td>
+        <td class="money">{{money .Share}}</td>
+        <td class="money"><strong>{{money .Due}}</strong></td>
+        <td class="row-actions">
+          {{if gt .UserID 0}}<a class="btn" href="/cards/{{$.C.ID}}/pay?who={{.UserID}}">Pay</a>{{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">Nothing outstanding on this card.</p>
+  {{end}}
+
+  <h2>Unpaid items</h2>
+  {{if .C.Unpaid}}
+  <form method="get" action="/cards/{{.C.ID}}/pay">
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Date</th>
+          <th>Item</th>
+          <th>Person</th>
+          <th></th>
+          <th class="money">Share</th>
+          <th class="money">Paid</th>
+          <th class="money">Due</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .C.Unpaid}}
+        <tr>
+          <td><input type="checkbox" name="split" value="{{.SplitID}}"></td>
+          <td>{{date .Date}}</td>
+          <td>{{.Label}}</td>
+          <td>{{.Participant}}</td>
+          <td><span class="tag {{.Status}}">{{.Status}}</span></td>
+          <td class="money">{{money .Share}}</td>
+          <td class="money">{{money .Paid}}</td>
+          <td class="money"><strong>{{money .Due}}</strong></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    <div class="form-actions">
+      <button class="btn btn-primary">Pay selected</button>
+      <span class="muted small">Leave all unchecked for a full-card lump sum.</span>
+    </div>
+  </form>
+  {{else}}
+  <p class="muted">No unpaid items.</p>
+  {{end}}
+
+  <h2>Payment history</h2>
+  {{if .C.Payments}}
+  {{range .C.Payments}}
+  <div class="card" style="margin-bottom:0.8rem">
+    <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap">
+      <strong>{{money .Amount}}</strong>
+      <span class="tag">{{.Method}}</span>
+      <span class="muted">{{date .Date}} · paid by {{.PaidBy}}</span>
+      {{if .Notes}}<span class="muted small">· {{.Notes}}</span>{{end}}
+      {{if gt .LedgerID 0}}<span class="tag approved" title="Wrote the savings → card transfer to the ledger">ledger</span>{{end}}
+      <form method="post" action="/payments/{{.ID}}/delete" style="margin-left:auto;display:inline"
+            onsubmit="return confirm('Delete this payment and its allocations?')">
+        <button class="btn-link btn-danger">Delete</button>
+      </form>
+    </div>
+    {{if .Allocs}}
+    <table style="margin-top:0.5rem">
+      <thead><tr><th>Item</th><th>Person</th><th class="money">Amount</th></tr></thead>
+      <tbody>
+        {{range .Allocs}}
+        <tr>
+          <td>{{.Label}}</td>
+          <td>{{.Participant}}</td>
+          <td class="money">{{money .Amount}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{end}}
+  </div>
+  {{end}}
+  {{else}}
+  <p class="muted">No payments recorded yet.</p>
+  {{end}}
+</div>
+{{end}}

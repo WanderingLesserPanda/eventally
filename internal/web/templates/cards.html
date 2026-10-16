@@ -1,0 +1,37 @@
+{{define "page/cards"}}
+<div class="page">
+  <div class="page-head">
+    <h1>Cards</h1>
+    <a class="btn" href="/accounts">Manage accounts</a>
+  </div>
+  {{if .Cards}}
+  <table>
+    <thead>
+      <tr>
+        <th>Card</th>
+        <th>Network</th>
+        <th class="money">Credit limit</th>
+        <th class="money">Outstanding</th>
+        <th class="money">Recorded balance</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Cards}}
+      <tr>
+        <td><a href="/cards/{{.ID}}">{{.Name}}</a>
+          {{if .Institution}}<span class="muted">· {{.Institution}}</span>{{end}}</td>
+        <td>{{.CardType}}</td>
+        <td class="money">{{if gt .CreditLimit 0}}{{money .CreditLimit}}{{end}}</td>
+        <td class="money"><strong>{{money .Outstanding}}</strong></td>
+        <td class="money">{{money .Recorded}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="5" class="muted">No credit cards yet — add one under Accounts.</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No credit cards yet — add one under Accounts.</p>
+  {{end}}
+</div>
+{{end}}

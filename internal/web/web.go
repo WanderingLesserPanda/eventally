@@ -115,6 +115,13 @@ func (a *App) Router() http.Handler {
 		// pending transaction.
 		authed.Get("/capture", a.captureGET)
 		authed.Post("/capture", a.capturePOST)
+
+		// Phase P5: card view + payments with allocations (D5, D6).
+		authed.Get("/cards", a.handleCards)
+		authed.Get("/cards/{id}", a.handleCardDetail)
+		authed.Get("/cards/{id}/pay", a.handleCardPayGet)
+		authed.Post("/cards/{id}/pay", a.handleCardPayPost)
+		authed.Post("/payments/{id}/delete", a.handlePaymentDelete)
 	})
 
 	return r

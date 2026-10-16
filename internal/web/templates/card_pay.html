@@ -1,0 +1,103 @@
+{{define "page/card_pay"}}
+<div class="page">
+  <div class="page-head">
+    <h1>Record payment — {{.F.CardName}}</h1>
+    <a class="btn" href="/cards/{{.F.CardID}}">Back to card</a>
+  </div>
+
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  {{if .F.NothingDue}}
+  <p class="muted">Nothing is due on this card right now.</p>
+  {{end}}
+
+  {{if .F.Rows}}
+  <form method="post" action="/cards/{{.F.CardID}}/pay">
+    {{template "csrf" .}}
+
+    <fieldset>
+      <legend>Allocation (leave a row empty to skip it)</legend>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Item</th>
+            <th>Person</th>
+            <th class="money">Due</th>
+            <th class="money">Allocated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .F.Rows}}
+          <tr>
+            <td>{{date .Date}}</td>
+            <td>{{.Label}}</td>
+            <td>{{.Participant}}</td>
+            <td class="money">{{money .Due}}</td>
+            <td class="money">
+              <input type="hidden" name="alloc_split[]" value="{{.SplitID}}">
+              <input type="text" name="alloc[]"
+                     value="{{if .Alloc}}{{.Alloc}}{{else}}{{.Due}}{{end}}"
+                     style="width:9rem;text-align:right">
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </fieldset>
+
+    <div class="form-grid">
+      <label>Payment amount
+        <input type="text" name="amount" value="{{.F.Amount}}" required>
+      </label>
+      <label>Payment date
+        <input type="date" name="payment_date" value="{{.F.Date}}" required>
+      </label>
+      <label>Method
+        <select name="method">
+          {{range .F.Methods}}
+          <option value="{{.}}" {{if eq $.F.Method .}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Paid by
+        <select name="paid_by">
+          {{range .F.Users}}
+          <option value="{{.ID}}" {{if eq $.F.PaidBy .ID}}selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Notes
+        <input type="text" name="notes" value="{{.F.Notes}}">
+      </label>
+    </div>
+
+    <div x-data="{ ledger: {{if .F.Ledger}}true{{else}}false{{end}} }" style="margin-top:1rem">
+      <label class="chip">
+        <input type="checkbox" name="write_ledger" value="on"
+               {{if .F.Ledger}}checked{{end}} x-model="ledger">
+        Also write the ledger transfer (savings → card)
+      </label>
+      <p class="muted small" x-show="ledger" style="margin:0.4rem 0 0">
+        Keeps the recorded card balance in step with the real one — a
+        split-less, approved balance movement linked to this payment.
+      </p>
+      <div class="form-grid" x-show="ledger" style="margin-top:0.6rem">
+        <label>From account (asset)
+          <select name="source_account">
+            <option value="">— choose —</option>
+            {{range .F.Sources}}
+            <option value="{{.ID}}" {{if eq $.F.SourceID .ID}}selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-primary">Record payment ({{money .F.AllocSum}})</button>
+      <a class="btn" href="/cards/{{.F.CardID}}">Cancel</a>
+    </div>
+  </form>
+  {{end}}
+</div>
+{{end}}
