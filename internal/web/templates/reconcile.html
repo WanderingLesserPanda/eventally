@@ -1,0 +1,35 @@
+{{define "page/reconcile"}}
+<div class="page-head">
+  <h1>Reconcile</h1>
+</div>
+<p class="muted small">For each statement month, type the balance you actually see in the bank app. The delta against the ledger is what you review — the drill-in page explains where it comes from.</p>
+{{range .Cards}}
+<div class="card" style="margin-bottom:1rem">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem">
+    <div>
+      <strong>{{.Name}}</strong>
+      {{if .CardType}}<span class="tag">{{.CardType}}</span>{{end}}
+    </div>
+    <a class="btn" href="/reconcile/{{.ID}}/{{$.Month}}">Reconcile {{$.Month}}</a>
+  </div>
+  <table style="width:100%;margin-top:.6rem">
+    <tr>
+      <td>Recorded balance</td>
+      <td class="money">{{money .Recorded}}</td>
+    </tr>
+    <tr>
+      <td>Outstanding (unpaid splits)</td>
+      <td class="money">{{money .Outstanding}}</td>
+    </tr>
+    {{if .HasAnchor}}
+    <tr>
+      <td>Last anchored: {{.LastMonth}} — actual {{money .LastActual}} (delta {{money .LastDelta}})</td>
+      <td class="money"></td>
+    </tr>
+    {{end}}
+  </table>
+</div>
+{{else}}
+<p class="muted">No credit cards yet. <a href="/accounts/new">Add one</a>.</p>
+{{end}}
+{{end}}

@@ -122,6 +122,11 @@ func (a *App) Router() http.Handler {
 		authed.Get("/cards/{id}/pay", a.handleCardPayGet)
 		authed.Post("/cards/{id}/pay", a.handleCardPayPost)
 		authed.Post("/payments/{id}/delete", a.handlePaymentDelete)
+
+		// Phase P6: reconciliation (D8) — monthly anchors + drill-in.
+		authed.Get("/reconcile", a.handleReconcile)
+		authed.Get("/reconcile/{id}/{month}", a.handleReconcileMonth)
+		authed.Post("/reconcile/{id}/{month}", a.handleReconcileMonthPost)
 	})
 
 	return r
@@ -222,27 +227,6 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	a.Sessions.Delete(r.Context(), auth.SessionIDFromRequest(r))
 	auth.ClearSessionCookie(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
-}
-
-// handleDashboard is the authenticated home page. The card grid arrives
-// in phase P6; for now it proves the auth loop end-to-end.
-func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var stats struct {
-		Accounts int
-		Txns     int
-		Pending  int
-	}
-	_ = a.Pool.QueryRow(ctx, `SELECT count(*) FROM account WHERE household_id = $1`,
-		sessionFromContext(ctx).Household).Scan(&stats.Accounts)
-	_ = a.Pool.QueryRow(ctx, `SELECT count(*) FROM "transaction" WHERE household_id = $1`,
-		sessionFromContext(ctx).Household).Scan(&stats.Txns)
-	_ = a.Pool.QueryRow(ctx, `SELECT count(*) FROM "transaction" WHERE household_id = $1 AND record_status = 'pending'`,
-		sessionFromContext(ctx).Household).Scan(&stats.Pending)
-	a.render(w, r, http.StatusOK, "dashboard.html", map[string]any{
-		"Title":  "Dashboard",
-		"Stats":  stats,
-	})
 }
 
 // countHouseholds returns the number of households (0 means first run).

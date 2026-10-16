@@ -1,18 +1,76 @@
 {{define "page/dashboard"}}
-<h1>Dashboard</h1>
-<p class="muted">Signed in. The card grid (spend by category, card balances, outstanding per person, pending review, budget vs actual) arrives in the reconciliation phase.</p>
+<div class="page-head">
+  <h1>Dashboard</h1>
+</div>
+<p class="muted small">{{.MonthLabel}} · <a href="/reconcile">reconcile</a> · <a href="/capture">quick capture</a> · <a href="/txns">transactions</a></p>
+
 <div class="grid">
-  <div class="card stat">
-    <div class="stat-label">Accounts</div>
-    <div class="stat-value">{{.Stats.Accounts}}</div>
+
+  <div class="card">
+    <div class="stat-label">Spend this month — top categories</div>
+    {{if .Cats}}
+    <table style="width:100%;margin-top:.5rem">
+      {{range .Cats}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td class="money">{{money .Actual}}</td>
+      </tr>
+      {{end}}
+      <tr><td><strong>Total</strong></td><td class="money"><strong>{{money $.SpendTotal}}</strong></td></tr>
+    </table>
+    {{else}}
+    <p class="muted small" style="margin-top:.5rem">No expense categories with activity yet.</p>
+    {{end}}
   </div>
-  <div class="card stat">
-    <div class="stat-label">Transactions</div>
-    <div class="stat-value">{{.Stats.Txns}}</div>
+
+  <div class="card">
+    <div class="stat-label">Card balances</div>
+    {{if .CardBals}}
+    <table style="width:100%;margin-top:.5rem">
+      {{range .CardBals}}
+      <tr>
+        <td><a href="/cards">{{.Name}}</a></td>
+        <td class="money">{{money .Recorded}}</td>
+        <td class="money">{{money .Outstanding}}</td>
+      </tr>
+      {{end}}
+    </table>
+    <p class="muted small">recorded / outstanding</p>
+    {{else}}
+    <p class="muted small" style="margin-top:.5rem">No credit cards yet.</p>
+    {{end}}
   </div>
+
+  <div class="card">
+    <div class="stat-label">Outstanding by person</div>
+    {{if .PersonOuts}}
+    <table style="width:100%;margin-top:.5rem">
+      {{range .PersonOuts}}
+      <tr>
+        <td>{{.Person}}</td>
+        <td class="money">{{money .Due}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}
+    <p class="muted small" style="margin-top:.5rem">Nothing outstanding.</p>
+    {{end}}
+  </div>
+
   <div class="card stat">
     <div class="stat-label">Pending review</div>
-    <div class="stat-value">{{.Stats.Pending}}</div>
+    <div class="stat-value">{{.Pending}}</div>
+    <p class="muted small"><a href="/txns?status=pending">Review queue</a></p>
   </div>
+
+  <div class="card">
+    <div class="stat-label">Budget vs actual (this month)</div>
+    {{if gt .BudgetTotal 0}}
+    <p class="muted small">Spent <strong>{{money .ActualOnBudget}}</strong> of <strong>{{money .BudgetTotal}}</strong> budgeted — {{money .BudgetRemaining}} remaining.</p>
+    {{else}}
+    <p class="muted small" style="margin-top:.5rem">No budgets set. Set <code>budget_per_month</code> on expense categories in <a href="/categories">Categories</a>.</p>
+    {{end}}
+  </div>
+
 </div>
 {{end}}

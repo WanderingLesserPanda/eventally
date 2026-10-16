@@ -1,0 +1,89 @@
+{{define "page/reconcile_month"}}
+<div class="page-head">
+  <h1>Reconcile {{.Data.CardName}} — {{.Data.Month}}</h1>
+</div>
+<p class="muted small"><a href="/reconcile">All cards</a>
+  {{if .Data.CardType}}<span class="tag">{{.Data.CardType}}</span>{{end}}
+  · statement items dated {{.Data.MonthStart.Format "2 Jan"}}–{{.Data.MonthEnd.Format "2 Jan"}}</p>
+
+<div class="grid">
+  <div class="card stat">
+    <div class="stat-label">Charges in month</div>
+    <div class="stat-value">{{money .Data.ChargesTotal}}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Credits in month</div>
+    <div class="stat-value">{{money .Data.CreditsTotal}}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Recorded balance (end of month)</div>
+    <div class="stat-value">{{money .Data.Recorded}}</div>
+  </div>
+</div>
+
+<h2>Actual balance</h2>
+<p class="muted small">Type the balance shown in the bank app at the end of {{.Data.Month}}. Saving it stores this month's anchor; the delta is actual − recorded.</p>
+{{if .Data.Anchor}}
+<p class="small">
+  Last saved: actual <strong>{{money .Data.Anchor.Actual}}</strong>,
+  recorded then {{money .Data.Anchor.Recorded}},
+  delta <strong>{{money .Data.Anchor.Delta}}</strong>.
+  {{if .Data.Anchor.Note}}Note: {{.Data.Anchor.Note}}. {{end}}
+  {{if .Data.Anchor.RecordedBy}}By {{.Data.Anchor.RecordedBy}}.{{end}}
+</p>
+{{end}}
+<form method="post" action="/reconcile/{{.Data.CardID}}/{{.Data.Month}}" class="filter-bar">
+  {{template "csrf" .}}
+  <label>Actual balance (RM)
+    <input type="text" name="actual" value="{{if .Data.Anchor}}{{.Data.Anchor.Actual.String}}{{end}}" placeholder="0.00" required>
+  </label>
+  <label>Note
+    <input type="text" name="note" value="{{if .Data.Anchor}}{{.Data.Anchor.Note}}{{end}}" placeholder="optional">
+  </label>
+  <div><button type="submit" class="btn-primary">Save reconciliation</button></div>
+</form>
+
+<h2>Charges by person</h2>
+{{if .Data.Charges}}
+<table>
+  <tr><th>Person</th><th class="money">Amount</th></tr>
+  {{range .Data.Charges}}
+  <tr><td>{{.Person}}</td><td class="money">{{money .Amount}}</td></tr>
+  {{end}}
+  <tr><td><strong>Total</strong></td><td class="money"><strong>{{money $.Data.ChargesTotal}}</strong></td></tr>
+</table>
+{{else}}
+<p class="muted">No card charges this month.</p>
+{{end}}
+
+<h2>Credits</h2>
+{{if .Data.Credits}}
+<table>
+  <tr><th>Date</th><th>Item</th><th class="money">Amount</th></tr>
+  {{range .Data.Credits}}
+  <tr><td>{{date .Date}}</td><td>{{.Label}}</td><td class="money">{{money .Amount}}</td></tr>
+  {{end}}
+  <tr><td colspan="2"><strong>Total</strong></td><td class="money"><strong>{{money $.Data.CreditsTotal}}</strong></td></tr>
+</table>
+{{else}}
+<p class="muted">No credits on this card this month.</p>
+{{end}}
+
+<h2>Statement items (drill-in)</h2>
+{{if .Data.Drill}}
+<table>
+  <tr><th>Date</th><th>Item</th><th>Person</th><th class="money">Share</th><th class="money">Allocated</th></tr>
+  {{range .Data.Drill}}
+  <tr>
+    <td>{{date .Date}}</td>
+    <td>{{.Label}}</td>
+    <td>{{.Person}}</td>
+    <td class="money">{{money .Share}}</td>
+    <td class="money">{{money .Allocated}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else}}
+<p class="muted">No unpaid statement items this month.</p>
+{{end}}
+{{end}}
