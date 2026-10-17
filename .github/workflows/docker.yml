@@ -10,7 +10,8 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner | lowercase }}/${{ github.event.repository.name | lowercase }}
+  # 'WanderingLesserPanda/eventally' -> lowercased for the GHCR tag
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner | lowercase }}/eventally
 
 jobs:
   build-push:
