@@ -23,7 +23,10 @@ type Config struct {
 	// PG holds the structured Postgres connection parameters that were
 	// resolved (from EVENTALLY_PG_* and/or EVENTALLY_DSN).
 	PG Postgres
-	// Secret signs session cookies and session token hashes.
+	// Secret is a 256-bit random key (64 hex chars). Currently reserved
+	// for the planned authentik/OIDC layer (D16) — validated at startup,
+	// not yet consumed by any crypto. Sessions and CSRF tokens are
+	// DB-backed random values (see internal/auth).
 	Secret [32]byte
 	// DataDir holds uploaded receipts and other user files.
 	DataDir string
@@ -52,10 +55,13 @@ func Load() (*Config, error) {
 	if len(secret) != 64 {
 		return nil, fmt.Errorf("EVENTALLY_SECRET must be 64 hex characters, got %d", len(secret))
 	}
-	if _, err := hex.DecodeString(secret); err != nil {
+	decoded, err := hex.DecodeString(secret)
+	if err != nil {
 		return nil, fmt.Errorf("EVENTALLY_SECRET must be hex: %w", err)
 	}
-	copy(c.Secret[:], secret)
+	// Store the decoded 32 bytes (256 bits), not the 64 ASCII hex
+	// characters — the field is a byte array meant to hold a 256-bit key.
+	copy(c.Secret[:], decoded)
 
 	pg, err := resolvePostgres()
 	if err != nil {

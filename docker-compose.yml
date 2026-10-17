@@ -17,8 +17,9 @@
 # First visit: http://<host>:8090  -> the first-run setup page creates
 # the household and the first user.
 #
-# NOTE: EVENTALLY_SECRET must be 64 hex chars (openssl rand -hex 32).
-# It signs the session cookies; without it the app refuses to start.
+# NOTE: EVENTALLY_SECRET must be exactly 64 hex chars (openssl rand -hex 32).
+# Reserved for the future authentik/OIDC layer (not yet consumed); the app
+# refuses to start without it.
 
 services:
   db:
