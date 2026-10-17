@@ -38,10 +38,11 @@ published to the repo's own container registry:
    ```
    If TrueNAS ever clears the login (e.g. after an OS update), repeat this.
 2. **Apps → Discover → ⋮ → Install via YAML** and paste the compose
-   snippet (the `docker-compose.yml` in the repo, with the two password
-   placeholders filled in — generate them in the shell with
-   `openssl rand -hex 16` and `openssl rand -hex 32`). Or `docker compose
-   up -d` from a clone on any Docker host.
+   snippet (the `docker-compose.yml` in the repo, with the two secrets
+   filled in — generate them in the shell with `openssl rand -hex 32` for
+   `EVENTALLY_SECRET` and any 8–64 character string of your choice for the
+   DB password; special characters `! @ # $ % ^ & * + -` all work).
+   Or `docker compose up -d` from a clone on any Docker host.
 3. First visit `http://<host>:8090` — the first-run setup page creates the
    household and the first user.
 4. Re-run the import script against the new database (one-off, run once)

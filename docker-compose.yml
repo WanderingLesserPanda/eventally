@@ -6,6 +6,12 @@
 #   1. docker login ghcr.io   (your GitHub account + a PAT with read
 #                              packages scope — see docs/notes/cutover.md)
 #   2. copy the compose snippet you need, fill in the two secrets
+#
+# POSTGRES_PASSWORD: 8-64 characters; special characters ! @ # $ % ^ & *
+# + - are all supported (the app connects via structured variables, not a
+# URL DSN). Generate one with specials, e.g.:
+#   tr -dc 'a-z!@#$%^&*+-' </dev/urandom | head -c 20; echo
+# (any 8-64 char string works; the app validates the length at startup.)
 # On a machine with a Go toolchain you can instead `docker build .`.
 #
 # First visit: http://<host>:8090  -> the first-run setup page creates
@@ -38,7 +44,14 @@ services:
         condition: service_healthy
     environment:
       EVENTALLY_ADDR: ":8090"
-      EVENTALLY_DSN: "postgres://eventally:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/eventally?sslmode=disable"
+      # Structured Postgres connection (not a URL DSN) so the password may
+      # contain special characters (!@#$%^&*+- ...). 8-64 chars, validated
+      # at app startup.
+      EVENTALLY_PG_HOST: "db"
+      EVENTALLY_PG_PORT: "5432"
+      EVENTALLY_PG_DATABASE: "eventally"
+      EVENTALLY_PG_USER: "eventally"
+      EVENTALLY_PG_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (8-64 chars, specials ok)}
       EVENTALLY_SECRET: ${EVENTALLY_SECRET:?set EVENTALLY_SECRET (64 hex) in .env}
       EVENTALLY_DATA_DIR: "/data"
     volumes:
