@@ -30,7 +30,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: eventally
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # "data": Postgres database files (all ledger data).
+      - data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U eventally -d eventally"]
       interval: 5s
@@ -56,10 +57,11 @@ services:
       EVENTALLY_SECRET: ${EVENTALLY_SECRET:?set EVENTALLY_SECRET (64 hex) in .env}
       EVENTALLY_DATA_DIR: "/data"
     volumes:
-      - receipts:/data
+      # "media": uploaded receipts and other user files (the app's data dir).
+      - media:/data
     ports:
       - "8090:8090"
 
 volumes:
-  pgdata:
-  receipts:
+  data:
+  media:
