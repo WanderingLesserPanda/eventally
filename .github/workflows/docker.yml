@@ -10,7 +10,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/eventally
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner | lowercase }}/${{ github.event.repository.name | lowercase }}
 
 jobs:
   build-push:
