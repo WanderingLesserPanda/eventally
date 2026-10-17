@@ -121,7 +121,7 @@ CREATE TABLE transaction (
                           CHECK (record_status IN ('pending','approved','void')),
     parent_transaction_id BIGINT REFERENCES transaction(id) ON DELETE SET NULL,
     source                TEXT NOT NULL DEFAULT 'manual'
-                          CHECK (source IN ('manual','template','import','prvimiles')),
+                          CHECK (source IN ('manual','template','import','tracker')),
     notes                 TEXT NOT NULL DEFAULT '',
     receipt_path          TEXT,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),

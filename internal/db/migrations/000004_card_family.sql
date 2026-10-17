@@ -1,9 +1,9 @@
 -- +goose Up
 -- 004_card_family: P8 import support.
 --
--- D19: one-level parent-child on accounts so the PrviMiles family
--- (parent "UOB PRVI Miles Elite Card" + Principal / Supplementary
--- physical cards) can roll up at the parent in the card views. The
+-- D19: one-level parent-child on accounts so a card family
+-- (one parent account + its supplementary physical cards) can
+-- roll up at the parent in the card views. The
 -- one-level restriction is enforced in the app layer (account CRUD),
 -- not in the DB, so the import can be fixed without a migration.
 -- D18: a counterparty may optionally be linked to a user (household
