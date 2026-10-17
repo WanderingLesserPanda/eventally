@@ -1,8 +1,12 @@
 # Eventally — self-hosted household ledger.
 #
-# On TrueNAS / any docker host:
-#   cp .env.example .env   # then edit values
-#   docker compose up -d
+# The app image is prebuilt by GitHub Actions on every push to main
+# (ghcr.io/wanderinglesserpanda/eventally:latest). On a host that can
+# reach ghcr.io (TrueNAS "Install via YAML", any docker host):
+#   1. docker login ghcr.io   (your GitHub account + a PAT with read
+#                              packages scope — see docs/notes/cutover.md)
+#   2. copy the compose snippet you need, fill in the two secrets
+# On a machine with a Go toolchain you can instead `docker build .`.
 #
 # First visit: http://<host>:8090  -> the first-run setup page creates
 # the household and the first user.
@@ -27,7 +31,7 @@ services:
       retries: 10
 
   app:
-    build: .
+    image: ghcr.io/wanderinglesserpanda/eventally:latest
     restart: unless-stopped
     depends_on:
       db:

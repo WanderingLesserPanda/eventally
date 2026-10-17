@@ -24,14 +24,30 @@ last section of the MVP build (P9).
 
 ## 1. Deploy on your home server (your step)
 
-1. `docker-compose up -d` from a clean clone
-   (`app` + `postgres`, named volume for receipts; home-LAN only).
-2. First-run setup: create the household, the two members, and log in with
-   the credentials you chose.
-3. Re-run the import script against the new database (one-off, run once)
+The app image is prebuilt by GitHub Actions on every push to `main` and
+published to the repo's own container registry:
+`ghcr.io/wanderinglesserpanda/eventally:latest`.
+
+1. In the TrueNAS Shell, log in to the registry once (only the app image
+   needs it; Postgres comes from Docker Hub):
+   ```
+   docker login ghcr.io
+   # username: your GitHub account
+   # password: a personal access token (fine-grained, read-packages scope
+   #           on the eventally repo only — Settings → Developer settings)
+   ```
+   If TrueNAS ever clears the login (e.g. after an OS update), repeat this.
+2. **Apps → Discover → ⋮ → Install via YAML** and paste the compose
+   snippet (the `docker-compose.yml` in the repo, with the two password
+   placeholders filled in — generate them in the shell with
+   `openssl rand -hex 16` and `openssl rand -hex 32`). Or `docker compose
+   up -d` from a clone on any Docker host.
+3. First visit `http://<host>:8090` — the first-run setup page creates the
+   household and the first user.
+4. Re-run the import script against the new database (one-off, run once)
    and re-check the acceptance numbers from the private import report on
    the new database — they must match to the sen.
-4. Spot-check a few pages against the old system:
+5. Spot-check a few pages against the old system:
    - `/cards` — recorded balance; outstanding by person.
    - `/reconcile` for any recent month — recorded balance + delta.
    - Dashboard cards (top categories, budget vs actual, balances,
