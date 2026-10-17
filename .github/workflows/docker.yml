@@ -10,9 +10,10 @@ permissions:
   packages: write
 
 env:
-  # github.repository is lowercased by GitHub (the owner name is not),
-  # which is exactly what GHCR tags require.
-  IMAGE_NAME: ghcr.io/${{ github.repository }}/eventally
+  # GHCR tags must be fully lowercase, but the owner name isn't — and
+  # github.repository doesn't lowercase it either (verified live), so the
+  # path is pinned. Update this line if the repo is renamed/transferred.
+  IMAGE_NAME: ghcr.io/wanderinglesserpanda/eventally
 
 jobs:
   build-push:
