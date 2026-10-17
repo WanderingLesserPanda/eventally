@@ -19,6 +19,7 @@
       {{range .Cards}}
       <tr>
         <td><a href="/cards/{{.ID}}">{{.Name}}</a>
+          {{if gt .ChildrenCount 0}}<span class="tag">{{.ChildrenCount}} physical cards</span>{{end}}
           {{if .Institution}}<span class="muted">· {{.Institution}}</span>{{end}}</td>
         <td>{{.CardType}}</td>
         <td class="money">{{if gt .CreditLimit 0}}{{money .CreditLimit}}{{end}}</td>

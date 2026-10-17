@@ -16,6 +16,12 @@
       <label>Relationship <span class="muted small">(optional)</span>
         <input type="text" name="relationship" value="{{.F.Relationship}}" placeholder="e.g. landlord, friend">
       </label>
+      <label>Household member <span class="muted small">(optional; people who are also users)</span>
+        <select name="user_id">
+          <option value="">— not a household member —</option>
+          {{range .F.Users}}<option value="{{.ID}}" {{if eq $.F.UserID .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
     </div>
     <label>Notes
       <textarea name="notes" rows="2">{{.F.Notes}}</textarea>

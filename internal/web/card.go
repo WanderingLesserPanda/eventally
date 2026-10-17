@@ -39,13 +39,14 @@ var payMethods = []string{"transfer", "online", "mobile", "cash", "other"}
 
 // cardLine is one row of the /cards list.
 type cardLine struct {
-	ID          int64
-	Name        string
-	Institution string
-	CardType    string
-	CreditLimit money.Money
-	Outstanding money.Money
-	Recorded    money.Money
+	ID            int64
+	Name          string
+	Institution   string
+	CardType      string
+	CreditLimit   money.Money
+	Outstanding   money.Money
+	Recorded      money.Money
+	ChildrenCount int
 }
 
 // byPerson is one row of the per-person outstanding summary.
@@ -99,6 +100,7 @@ type cardDetailData struct {
 	People      []byPerson
 	Unpaid      []unpaidLine
 	Payments    []payLine
+	Family      *cardFamily
 }
 
 // payRow is one allocation row of the pay form: the payable split plus the
@@ -131,6 +133,28 @@ type cardPayForm struct {
 
 // --- shared queries ---------------------------------------------------------
 
+// cardFamilyLine is one card in a family roll-up (self, parent or child).
+type cardFamilyLine struct {
+	ID          int64
+	Name        string
+	CardType    string
+	Outstanding money.Money
+	Recorded    money.Money
+}
+
+// cardFamily is the one-level parent/child family of a card (D19): the
+// card itself plus its parent or its children.
+type cardFamily struct {
+	ID          int64
+	Name        string
+	IsParent    bool
+	ParentID    int64
+	ParentName  string
+	Children    []cardFamilyLine
+	TotalOut    money.Money // roll-up when IsParent
+	TotalRec    money.Money // roll-up when IsParent
+}
+
 // cardAccountRow loads one credit-card account scoped to the household.
 func (a *App) cardAccountRow(ctx context.Context, hh, id int64) (int64, string, string, string, money.Money, error) {
 	var (
@@ -154,14 +178,46 @@ func (a *App) cardAccountRow(ctx context.Context, hh, id int64) (int64, string, 
 	return acID, name, institution, cardType, creditLimit, nil
 }
 
-// cardOutstanding is the sum of unallocated expense splits on the card
-// (pending + approved, never void, never transfer — transfers have no splits).
+// inPh builds an IN-list of placeholders like "$2, $3, $4" starting at
+// placeholder 2 for len(v) values (placeholder 1 is always the household
+// id).
+func inPh(v []int64) string {
+	if len(v) == 0 {
+		return "0" // matches nothing
+	}
+	ph := make([]string, len(v))
+	for i := range v {
+		ph[i] = fmt.Sprintf("$%d", i+2)
+	}
+	return strings.Join(ph, ", ")
+}
+
+// toAny converts []int64 into []any for pgx arguments.
+func toAny(v []int64) []any {
+	out := make([]any, len(v))
+	for i, x := range v {
+		out[i] = x
+	}
+	return out
+}
+
+// cardUnpaidWhere is the card's outstanding split filter (pending +
+// approved, never void, never transfer — transfers have no splits). The
+// IN_ACCOUNTS marker is replaced by inPh(fam) via unpaidWhereFor;
+// placeholders 2..1+len(fam) hold the family account ids.
 const cardUnpaidWhere = `t.household_id = $1 AND t.record_status <> 'void'
 	AND t.class = 'expense' AND (
-	  (t.origin_type = 'account' AND t.origin_ref = $2)
-	  OR (t.destination_type = 'account' AND t.destination_ref = $2))`
+	  (t.origin_type = 'account' AND t.origin_ref IN (IN_ACCOUNTS))
+	  OR (t.destination_type = 'account' AND t.destination_ref IN (IN_ACCOUNTS)))`
 
-func (a *App) cardOutstanding(ctx context.Context, hh, card int64) (money.Money, error) {
+// unpaidWhereFor scopes cardUnpaidWhere to a card family's account ids.
+func unpaidWhereFor(fam []int64) string {
+	return strings.ReplaceAll(cardUnpaidWhere, "IN_ACCOUNTS", inPh(fam))
+}
+
+// cardOutstanding is the sum of unallocated expense splits on the card
+// family (the roll-up for a parent, per D19).
+func (a *App) cardOutstanding(ctx context.Context, hh int64, fam []int64) (money.Money, error) {
 	var out money.Money
 	err := a.Pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(s.amount - COALESCE(al.a, 0)), 0)
@@ -169,36 +225,43 @@ func (a *App) cardOutstanding(ctx context.Context, hh, card int64) (money.Money,
 		JOIN "transaction" t ON t.id = s.transaction_id
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
 			FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
-		WHERE `+cardUnpaidWhere, hh, card).Scan(&out)
+		WHERE `+unpaidWhereFor(fam),
+		append([]any{hh}, toAny(fam)...)...).Scan(&out)
 	return out, err
 }
 
-// cardRecordedBalance computes the card's ledger liability:
+// cardRecordedBalance computes the card family's ledger liability (D19
+// roll-up for a parent):
 //
 //	opening + charges (card as origin) − credits (card as destination)
 //	        − payments without a ledger link (D6: cash settled out-of-band)
 //
 // Payments that wrote a D6 transfer are already reflected in the
 // destination=card total, so they are excluded from the payment sum.
-func (a *App) cardRecordedBalance(ctx context.Context, hh, card int64) (money.Money, error) {
+// Each term is an independent scalar subquery — never join account rows
+// to transactions here (that multiplies every amount per account).
+func (a *App) cardRecordedBalance(ctx context.Context, hh int64, fam []int64) (money.Money, error) {
 	var bal money.Money
+	ph := inPh(fam)
 	err := a.Pool.QueryRow(ctx, `
-		SELECT COALESCE(a.opening_balance, 0)
+		SELECT COALESCE((SELECT SUM(a.opening_balance) FROM account a
+		                  WHERE a.household_id = $1 AND a.id IN (`+ph+`)), 0)
 		 + COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.origin_type = 'account' AND t.origin_ref = $2), 0)
+		        AND t.origin_type = 'account' AND t.origin_ref IN (`+ph+`)), 0)
 		 - COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.destination_type = 'account' AND t.destination_ref = $2), 0)
+		        AND t.destination_type = 'account' AND t.destination_ref IN (`+ph+`)), 0)
 		 - COALESCE((SELECT SUM(p.amount) FROM payment p
-		              WHERE p.household_id = $1 AND p.account_id = $2
-		        AND p.ledger_transaction_id IS NULL), 0)
-		FROM account a WHERE a.id = $2 AND a.household_id = $1`, hh, card).Scan(&bal)
+		              WHERE p.household_id = $1 AND p.ledger_transaction_id IS NULL
+		        AND p.account_id IN (`+ph+`)), 0)`,
+		append([]any{hh}, toAny(fam)...)...).Scan(&bal)
 	return bal, err
 }
 
-// cardUnpaidLines lists the card's payable splits with outstanding > 0.
-func (a *App) cardUnpaidLines(ctx context.Context, hh, card int64) ([]unpaidLine, error) {
+// cardUnpaidLines lists the card family's payable splits with
+// outstanding > 0, oldest first.
+func (a *App) cardUnpaidLines(ctx context.Context, hh int64, fam []int64) ([]unpaidLine, error) {
 	rows, err := a.Pool.Query(ctx, `
 		SELECT s.id, t.transaction_date,
 		       COALESCE(NULLIF(t.description, ''), m.name, '—'),
@@ -214,9 +277,9 @@ func (a *App) cardUnpaidLines(ctx context.Context, hh, card int64) ([]unpaidLine
 		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND cp.id = s.participant_ref
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
 			FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
-		WHERE `+cardUnpaidWhere+`
+		WHERE `+unpaidWhereFor(fam)+`
 		AND s.amount - COALESCE(al.a, 0) > 0
-		ORDER BY t.transaction_date, s.id`, hh, card)
+		ORDER BY t.transaction_date, s.id`, append([]any{hh}, toAny(fam)...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -233,11 +296,13 @@ func (a *App) cardUnpaidLines(ctx context.Context, hh, card int64) ([]unpaidLine
 		l.Due = l.Share.Sub(paid)
 		out = append(out, l)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
-// cardByPerson summarises outstanding per participant.
-func (a *App) cardByPerson(ctx context.Context, hh, card int64) ([]byPerson, error) {
+// cardByPerson summarises outstanding per participant over the given
+// account scope (self-only for a child's detail, the whole family for a
+// parent's roll-up).
+func (a *App) cardByPerson(ctx context.Context, hh int64, fam []int64) ([]byPerson, error) {
 	rows, err := a.Pool.Query(ctx, `
 		SELECT COALESCE(CASE s.participant_type
 		                  WHEN 'household_user' THEN u.display_name
@@ -252,10 +317,10 @@ func (a *App) cardByPerson(ctx context.Context, hh, card int64) ([]byPerson, err
 		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND cp.id = s.participant_ref
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
 			FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
-		WHERE `+cardUnpaidWhere+`
+		WHERE `+unpaidWhereFor(fam)+`
 		GROUP BY 1, 2
 		HAVING SUM(s.amount - COALESCE(al.a, 0)) > 0
-		ORDER BY 4 DESC, 1`, hh, card)
+		ORDER BY 4 DESC, 1`, append([]any{hh}, toAny(fam)...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -268,18 +333,19 @@ func (a *App) cardByPerson(ctx context.Context, hh, card int64) ([]byPerson, err
 		}
 		out = append(out, p)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
-// cardPayments loads the card's payment history with allocations attached.
-func (a *App) cardPayments(ctx context.Context, hh, card int64) ([]payLine, error) {
+// cardPayments loads the card family's payment history with allocations attached.
+func (a *App) cardPayments(ctx context.Context, hh int64, fam []int64) ([]payLine, error) {
+	ph := inPh(fam)
 	rows, err := a.Pool.Query(ctx, `
 		SELECT p.id, p.payment_date, p.amount, p.method, u.display_name,
 		       p.notes, COALESCE(p.ledger_transaction_id, 0)
 		FROM payment p
 		JOIN "user" u ON u.id = p.paid_by
-		WHERE p.household_id = $1 AND p.account_id = $2
-		ORDER BY p.payment_date DESC, p.id DESC`, hh, card)
+		WHERE p.household_id = $1 AND p.account_id IN (`+ph+`)
+		ORDER BY p.payment_date DESC, p.id DESC`, append([]any{hh}, toAny(fam)...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -302,12 +368,11 @@ func (a *App) cardPayments(ctx context.Context, hh, card int64) ([]payLine, erro
 	for i, p := range pays {
 		ids[i] = p.ID
 	}
-	// IN-list placeholders via $1..$N built once.
-	ph := make([]string, len(ids))
-	args := make([]any, 0, len(ids)+2)
-	args = append(args, hh, card)
+	ph2 := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, hh)
 	for i, id := range ids {
-		ph[i] = fmt.Sprintf("$%d", i+3)
+		ph2[i] = fmt.Sprintf("$%d", i+2)
 		args = append(args, id)
 	}
 	arows, err := a.Pool.Query(ctx, `
@@ -323,8 +388,8 @@ func (a *App) cardPayments(ctx context.Context, hh, card int64) ([]payLine, erro
 		LEFT JOIN merchant m ON m.id = t.merchant_id
 		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
 		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND cp.id = s.participant_ref
-		WHERE p.household_id = $1 AND p.account_id = $2
-		  AND p.id IN (`+strings.Join(ph, ", ")+`)
+		WHERE p.household_id = $1
+		  AND p.id IN (`+strings.Join(ph2, ",")+`)
 		ORDER BY p.payment_date, p.id, s.id`, args...)
 	if err != nil {
 		return nil, err
@@ -350,16 +415,146 @@ func (a *App) cardPayments(ctx context.Context, hh, card int64) ([]payLine, erro
 	return pays, nil
 }
 
+// cardFamilyView builds the D19 family display for a card detail page:
+// the card itself, its parent link (when a child), and its active
+// children (when a parent) with each child's own numbers. The roll-up
+// (TotalOut/TotalRec) is computed by the caller over the whole family.
+func (a *App) cardFamilyView(ctx context.Context, hh, id int64) (*cardFamily, error) {
+	var pid sql.NullInt64
+	if err := a.Pool.QueryRow(ctx, `
+		SELECT parent_id FROM account
+		WHERE id = $1 AND household_id = $2 AND account_type = 'credit_card'`, id, hh).
+		Scan(&pid); err != nil {
+		return nil, err
+	}
+	var pname string
+	if pid.Valid {
+		if err := a.Pool.QueryRow(ctx, `
+			SELECT name FROM account WHERE id = $1 AND household_id = $2`,
+			pid.Int64, hh).Scan(&pname); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				// Broken link: show the card alone.
+				return &cardFamily{ID: id}, nil
+			}
+			return nil, err
+		}
+	}
+	rows, err := a.Pool.Query(ctx, `
+		SELECT id, name, COALESCE(card_type, ''), parent_id
+		FROM account
+		WHERE household_id = $1 AND account_type = 'credit_card' AND is_active
+		  AND (id = $2 OR parent_id = $2)
+		ORDER BY sort_order, name`, hh, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cf *cardFamily
+	var kids []cardFamilyLine
+	for rows.Next() {
+		var (
+			cid   int64
+			cname string
+			ct    string
+			kpid  sql.NullInt64
+		)
+		if err := rows.Scan(&cid, &cname, &ct, &kpid); err != nil {
+			return nil, err
+		}
+		if cid == id {
+			if kpid.Valid {
+				cf = &cardFamily{ID: id, Name: cname, ParentID: pid.Int64, ParentName: pname}
+			} else {
+				cf = &cardFamily{ID: id, Name: cname, IsParent: true}
+			}
+		} else {
+			kids = append(kids, cardFamilyLine{ID: cid, Name: cname, CardType: ct})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if cf == nil {
+		return &cardFamily{ID: id}, nil
+	}
+	cf.Children = kids
+	return cf, nil
+}
+
+// cardOperatingFamily returns the account ids the detail/pay pages operate
+// on for card id: the whole family when id is a parent (D19 roll-up), else
+// just id. Also returns the family view for display.
+func (a *App) cardOperatingFamily(ctx context.Context, hh, id int64) ([]int64, *cardFamily, error) {
+	famView, err := a.cardFamilyView(ctx, hh, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if famView.IsParent {
+		fam := []int64{famView.ID}
+		for _, k := range famView.Children {
+			fam = append(fam, k.ID)
+		}
+		return fam, famView, nil
+	}
+	return []int64{id}, famView, nil
+}
+
+// cardActiveChildrenIDs returns the active child ids of parent id (D19).
+func (a *App) cardActiveChildrenIDs(ctx context.Context, hh, parent int64) ([]int64, error) {
+	rows, err := a.Pool.Query(ctx, `
+		SELECT id FROM account
+		WHERE household_id = $1 AND parent_id = $2 AND is_active
+		ORDER BY sort_order, name`, hh, parent)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var k int64
+		if rows.Scan(&k) != nil {
+			return nil, rows.Err()
+		}
+		ids = append(ids, k)
+	}
+	return ids, rows.Err()
+}
+
+// cardListFamily is the account ids a /cards list row aggregates: the
+// family (self + active children) when the row is a parent, else itself.
+// nCards counts physical cards including the row itself (a child's
+// parent row shows "2 physical cards" for parent + 1 child).
+func (a *App) cardListFamily(ctx context.Context, hh, id int64) ([]int64, int, error) {
+	var pid sql.NullInt64
+	if err := a.Pool.QueryRow(ctx,
+		`SELECT parent_id FROM account WHERE id = $1`, id).Scan(&pid); err != nil {
+		return nil, 0, err
+	}
+	if pid.Valid { // child row: no roll-up
+		return []int64{id}, 1, nil
+	}
+	kids, err := a.cardActiveChildrenIDs(ctx, hh, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	fam := append([]int64{id}, kids...)
+	return fam, len(kids) + 1, nil
+}
+
 // --- list + detail -----------------------------------------------------------
 
 func (a *App) handleCards(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	hh := sessionFromContext(ctx).Household
 
+	// One row per family (D19): cards with parent_id NULL are either
+	// standalones (aggregate self) or parents (roll up active children).
+	// Children are hidden from the list; they show under the parent page.
 	rows, err := a.Pool.Query(ctx, `
 		SELECT id, name, institution, COALESCE(card_type, ''), COALESCE(credit_limit, 0)
 		FROM account
 		WHERE household_id = $1 AND account_type = 'credit_card'
+		  AND parent_id IS NULL
 		ORDER BY is_active DESC, name`, hh)
 	if err != nil {
 		http.Error(w, "list cards: "+err.Error(), 500)
@@ -374,12 +569,18 @@ func (a *App) handleCards(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "scan card: "+err.Error(), 500)
 			return
 		}
-		out, err := a.cardOutstanding(ctx, hh, c.ID)
+		fam, nKids, err := a.cardListFamily(ctx, hh, c.ID)
+		if err != nil {
+			http.Error(w, "load card family: "+err.Error(), 500)
+			return
+		}
+		c.ChildrenCount = nKids
+		out, err := a.cardOutstanding(ctx, hh, fam)
 		if err != nil {
 			http.Error(w, "card outstanding: "+err.Error(), 500)
 			return
 		}
-		bal, err := a.cardRecordedBalance(ctx, hh, c.ID)
+		bal, err := a.cardRecordedBalance(ctx, hh, fam)
 		if err != nil {
 			http.Error(w, "card balance: "+err.Error(), 500)
 			return
@@ -412,27 +613,60 @@ func (a *App) handleCardDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load card: "+err.Error(), 500)
 		return
 	}
-	out, err := a.cardOutstanding(ctx, hh, id)
+	famView, err := a.cardFamilyView(ctx, hh, id)
+	if err != nil {
+		http.Error(w, "load card family: "+err.Error(), 500)
+		return
+	}
+	var fam []int64
+	if famView.IsParent {
+		fam = []int64{famView.ID}
+		for _, k := range famView.Children {
+			fam = append(fam, k.ID)
+		}
+	} else {
+		fam = []int64{id}
+	}
+	out, err := a.cardOutstanding(ctx, hh, fam)
 	if err != nil {
 		http.Error(w, "card outstanding: "+err.Error(), 500)
 		return
 	}
-	bal, err := a.cardRecordedBalance(ctx, hh, id)
+	bal, err := a.cardRecordedBalance(ctx, hh, fam)
 	if err != nil {
 		http.Error(w, "card balance: "+err.Error(), 500)
 		return
 	}
-	people, err := a.cardByPerson(ctx, hh, id)
+	if famView.IsParent {
+		famView.TotalOut, famView.TotalRec = out, bal
+		for i := range famView.Children {
+			// Each child row shows its own self-scope numbers (a parent
+			// can't roll up inside another roll-up).
+			cout, err := a.cardOutstanding(ctx, hh, []int64{famView.Children[i].ID})
+			if err != nil {
+				http.Error(w, "child outstanding: "+err.Error(), 500)
+				return
+			}
+			cbal, err := a.cardRecordedBalance(ctx, hh, []int64{famView.Children[i].ID})
+			if err != nil {
+				http.Error(w, "child balance: "+err.Error(), 500)
+				return
+			}
+			famView.Children[i].Outstanding = cout
+			famView.Children[i].Recorded = cbal
+		}
+	}
+	people, err := a.cardByPerson(ctx, hh, fam)
 	if err != nil {
 		http.Error(w, "card by person: "+err.Error(), 500)
 		return
 	}
-	unpaid, err := a.cardUnpaidLines(ctx, hh, id)
+	unpaid, err := a.cardUnpaidLines(ctx, hh, fam)
 	if err != nil {
 		http.Error(w, "card unpaid: "+err.Error(), 500)
 		return
 	}
-	pays, err := a.cardPayments(ctx, hh, id)
+	pays, err := a.cardPayments(ctx, hh, fam)
 	if err != nil {
 		http.Error(w, "card payments: "+err.Error(), 500)
 		return
@@ -444,6 +678,7 @@ func (a *App) handleCardDetail(w http.ResponseWriter, r *http.Request) {
 			ID: id, Name: name, Institution: inst, CardType: ctype,
 			CreditLimit: limit, Outstanding: out, Recorded: bal,
 			People: people, Unpaid: unpaid, Payments: pays,
+			Family: famView,
 		},
 	})
 }
@@ -469,7 +704,12 @@ func (a *App) handleCardPayGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load card: "+err.Error(), 500)
 		return
 	}
-	all, err := a.cardUnpaidLines(ctx, hh, id)
+	fam, famView, err := a.cardOperatingFamily(ctx, hh, id)
+	if err != nil {
+		http.Error(w, "load card family: "+err.Error(), 500)
+		return
+	}
+	all, err := a.cardUnpaidLines(ctx, hh, fam)
 	if err != nil {
 		http.Error(w, "card unpaid: "+err.Error(), 500)
 		return
@@ -489,14 +729,16 @@ func (a *App) handleCardPayGet(w http.ResponseWriter, r *http.Request) {
 	} else if who := q.Get("who"); who != "" {
 		noSel = false
 		if uid, perr := strconv.ParseInt(who, 10, 64); perr == nil && uid > 0 {
+			whargs := append([]any{hh}, toAny(fam)...)
+			whargs = append(whargs, uid)
 			rows2, qerr := a.Pool.Query(ctx, `
 				SELECT s.id FROM split s
 				JOIN "transaction" t ON t.id = s.transaction_id
-				WHERE `+cardUnpaidWhere+`
-				  AND s.participant_type = 'household_user' AND s.participant_ref = $3
-				  AND s.amount > COALESCE(
-				    (SELECT SUM(pa.amount) FROM payment_allocation pa WHERE pa.split_id = s.id), 0)`,
-				hh, id, uid)
+				WHERE `+unpaidWhereFor(fam)+`
+				AND s.participant_type = 'household_user' AND s.participant_ref = $`+strconv.Itoa(len(whargs))+`
+				AND s.amount > COALESCE(
+				(SELECT SUM(pa.amount) FROM payment_allocation pa WHERE pa.split_id = s.id), 0)`,
+				whargs...)
 			if qerr == nil {
 				for rows2.Next() {
 					var sid int64
@@ -518,6 +760,9 @@ func (a *App) handleCardPayGet(w http.ResponseWriter, r *http.Request) {
 		Ledger:     true,
 		Methods:    payMethods,
 		NothingDue: len(all) == 0,
+	}
+	if famView != nil && famView.ParentID > 0 {
+		f.CardName += " (family: " + famView.ParentName + ")"
 	}
 	f.Users, _ = a.userOptions(ctx, hh)
 	f.Sources, _ = a.assetAccountOptions(ctx, hh)
@@ -567,8 +812,12 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load card: "+err.Error(), 500)
 		return
 	}
-
-	all, err := a.cardUnpaidLines(ctx, hh, id)
+	fam, _, err := a.cardOperatingFamily(ctx, hh, id)
+	if err != nil {
+		http.Error(w, "load card family: "+err.Error(), 500)
+		return
+	}
+	all, err := a.cardUnpaidLines(ctx, hh, fam)
 	if err != nil {
 		http.Error(w, "card unpaid: "+err.Error(), 500)
 		return

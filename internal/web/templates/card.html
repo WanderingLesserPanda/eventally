@@ -25,6 +25,26 @@
     {{end}}
   </div>
 
+  {{if and .C.Family (or (and .C.Family.IsParent .C.Family.Children) .C.Family.ParentName)}}
+  <h2>Card family ({{if .C.Family.IsParent}}this card is the parent{{else}}part of {{.C.Family.ParentName}}{{end}})</h2>
+  {{if .C.Family.IsParent}}
+  <table>
+    <thead><tr><th>Physical card</th><th>Type</th><th class="money">Outstanding</th><th class="money">Recorded</th></tr></thead>
+    <tbody>
+      <tr><td><strong>{{.C.Name}}</strong> (total)</td><td></td>
+        <td class="money"><strong>{{money .C.Family.TotalOut}}</strong></td>
+        <td class="money"><strong>{{money .C.Family.TotalRec}}</strong></td></tr>
+      {{range .C.Family.Children}}
+      <tr><td><a href="/cards/{{.ID}}">{{.Name}}</a></td><td>{{.CardType}}</td>
+        <td class="money">{{money .Outstanding}}</td><td class="money">{{money .Recorded}}</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>Statements are reconciled at the parent: <a href="/cards/{{.C.Family.ParentID}}">{{.C.Family.ParentName}}</a>.</p>
+  {{end}}
+  {{end}}
+
   <h2>Outstanding by person</h2>
   {{if .C.People}}
   <table>

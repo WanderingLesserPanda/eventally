@@ -100,50 +100,56 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Card 2: credit card balances.
+	// Card 2: credit card balances, one row per family (D19): a parent
+	// rolls up its active children; standalone cards show themselves.
 	var cardBals []dashCardBal
 	rows, err = a.Pool.Query(ctx, `
-		SELECT a.name,
-		       (SELECT COALESCE(x.opening_balance, 0)
-		        + COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
-		                    WHERE t.household_id = $1 AND t.record_status <> 'void'
-		                  AND t.origin_type = 'account' AND t.origin_ref = a.id), 0)
-		        - COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
-		                    WHERE t.household_id = $1 AND t.record_status <> 'void'
-		                  AND t.destination_type = 'account' AND t.destination_ref = a.id), 0)
-		        - COALESCE((SELECT SUM(p.amount) FROM payment p
-		                    WHERE p.household_id = $1 AND p.account_id = a.id
-		                  AND p.ledger_transaction_id IS NULL), 0)
-		        FROM account x WHERE x.id = a.id),
-		       (SELECT COALESCE(SUM(s.amount - COALESCE(al.a, 0)), 0)
-		        FROM split s
-		        JOIN "transaction" t ON t.id = s.transaction_id
-		        LEFT JOIN (SELECT split_id, SUM(amount) AS a
-		            FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
-		        WHERE t.household_id = $1 AND t.record_status <> 'void'
-		          AND t.class = 'expense' AND (
-		            (t.origin_type = 'account' AND t.origin_ref = a.id)
-		            OR (t.destination_type = 'account' AND t.destination_ref = a.id)))
+		SELECT a.id, a.name
 		FROM account a
-		WHERE a.household_id = $1 AND a.account_type = 'credit_card' AND a.is_active
+		WHERE a.household_id = $1 AND a.account_type = 'credit_card'
+		  AND (a.parent_id IS NULL
+		       OR NOT EXISTS (SELECT 1 FROM account p WHERE p.id = a.parent_id))
 		ORDER BY a.sort_order, a.name`, hh)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	type cardSeed struct {
+		id   int64
+		name string
+	}
+	var seeds []cardSeed
 	for rows.Next() {
-		var c dashCardBal
-		if err := rows.Scan(&c.Name, &c.Recorded, &c.Outstanding); err != nil {
+		var s cardSeed
+		if err := rows.Scan(&s.id, &s.name); err != nil {
 			rows.Close()
 			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		cardBals = append(cardBals, c)
+		seeds = append(seeds, s)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+	for _, s := range seeds {
+		fam, _, err := a.cardListFamily(ctx, hh, s.id)
+		if err != nil {
+			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		rec, err := a.cardRecordedBalance(ctx, hh, fam)
+		if err != nil {
+			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		out, err := a.cardOutstanding(ctx, hh, fam)
+		if err != nil {
+			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		cardBals = append(cardBals, dashCardBal{Name: s.name, Recorded: rec, Outstanding: out})
 	}
 
 	// Card 3: outstanding per person across all credit cards.

@@ -97,8 +97,10 @@ func parseReconMonth(s string) (time.Time, bool) {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC), true
 }
 
-// handleReconcile lists the household's cards with current computed
-// balances and each card's newest reconciliation anchor.
+// handleReconcile lists the household's card families with current
+// computed balances and each family's newest reconciliation anchor.
+// One row per family (D19): a parent rolls up its active children,
+// children are hidden (their statements are the parent's).
 func (a *App) handleReconcile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	hh := sessionFromContext(ctx).Household
@@ -106,62 +108,70 @@ func (a *App) handleReconcile(w http.ResponseWriter, r *http.Request) {
 
 	var cards []reconCardRow
 	rows, err := a.Pool.Query(ctx, `
-		SELECT a.id, a.name, COALESCE(a.card_type, ''),
-		       (SELECT COALESCE(x.opening_balance, 0)
-		        + COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
-		                    WHERE t.household_id = $1 AND t.record_status <> 'void'
-		                  AND t.origin_type = 'account' AND t.origin_ref = a.id), 0)
-		        - COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
-		                    WHERE t.household_id = $1 AND t.record_status <> 'void'
-		                  AND t.destination_type = 'account' AND t.destination_ref = a.id), 0)
-		        - COALESCE((SELECT SUM(p.amount) FROM payment p
-		                    WHERE p.household_id = $1 AND p.account_id = a.id
-		                  AND p.ledger_transaction_id IS NULL), 0)
-		        FROM account x WHERE x.id = a.id) AS recorded,
-		       (SELECT COALESCE(SUM(s.amount - COALESCE(al.a, 0)), 0)
-		        FROM split s
-		        JOIN "transaction" t ON t.id = s.transaction_id
-		        LEFT JOIN (SELECT split_id, SUM(amount) AS a
-		            FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
-		        WHERE t.household_id = $1 AND t.record_status <> 'void'
-		          AND t.class = 'expense' AND (
-		            (t.origin_type = 'account' AND t.origin_ref = a.id)
-		            OR (t.destination_type = 'account' AND t.destination_ref = a.id)))
-		       AS outstanding,
-		       rc.statement_month, rc.actual_balance, rc.recorded_balance
+		SELECT a.id, a.name, COALESCE(a.card_type, ''), rc.statement_month,
+		       rc.actual_balance, rc.recorded_balance
 		FROM account a
 		LEFT JOIN LATERAL (SELECT rc.statement_month, rc.actual_balance, rc.recorded_balance
 		                   FROM reconciliation rc
 		                   WHERE rc.household_id = a.household_id
 		                     AND rc.account_id = a.id
 		                   ORDER BY rc.statement_month DESC LIMIT 1) rc ON TRUE
-		WHERE a.household_id = $1 AND a.account_type = 'credit_card' AND a.is_active
+		WHERE a.household_id = $1 AND a.account_type = 'credit_card'
+		  AND a.is_active AND a.parent_id IS NULL
 		ORDER BY a.sort_order, a.name`, hh)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	type seed struct {
+		id      int64
+		name    string
+		ctype   string
+		month   sql.NullTime
+		actual  money.Money
+		recorded money.Money
+	}
+	var seeds []seed
 	for rows.Next() {
-		var c reconCardRow
-		var lastMonth sql.NullTime
-		var lastActual, lastRecorded money.Money
-		if err := rows.Scan(&c.ID, &c.Name, &c.CardType, &c.Recorded,
-			&c.Outstanding, &lastMonth, &lastActual, &lastRecorded); err != nil {
+		var s seed
+		if err := rows.Scan(&s.id, &s.name, &s.ctype, &s.month, &s.actual,
+			&s.recorded); err != nil {
+			rows.Close()
 			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if lastMonth.Valid {
-			c.HasAnchor = true
-			c.LastMonth = lastMonth.Time.Format(reconMonthLayout)
-			c.LastActual = lastActual
-			c.LastDelta = lastActual.Sub(lastRecorded)
-		}
-		cards = append(cards, c)
+		seeds = append(seeds, s)
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+	for _, s := range seeds {
+		fam, _, err := a.cardListFamily(ctx, hh, s.id)
+		if err != nil {
+			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		c := reconCardRow{ID: s.id, Name: s.name, CardType: s.ctype}
+		rec, err := a.cardRecordedBalance(ctx, hh, fam)
+		if err != nil {
+			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		out, err := a.cardOutstanding(ctx, hh, fam)
+		if err != nil {
+			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		c.Recorded, c.Outstanding = rec, out
+		if s.month.Valid {
+			c.HasAnchor = true
+			c.LastMonth = s.month.Time.Format(reconMonthLayout)
+			c.LastActual = s.actual
+			c.LastDelta = s.actual.Sub(s.recorded)
+		}
+		cards = append(cards, c)
 	}
 
 	a.render(w, r, http.StatusOK, "reconcile.html", map[string]any{
@@ -172,26 +182,29 @@ func (a *App) handleReconcile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// cardRecordedAt computes the recorded card balance as of endOfMonth
-// (inclusive date): opening + charges - credits - out-of-band payments,
-// each restricted to rows dated on or before that day.
-func (a *App) cardRecordedAt(ctx context.Context, hh, card int64, endOfMonth time.Time) (money.Money, error) {
+// cardRecordedAtFamily computes the family's recorded card balance as of
+// endOfMonth (inclusive date): opening + charges - credits - out-of-band
+// payments, each restricted to rows dated on or before that day.
+func (a *App) cardRecordedAtFamily(ctx context.Context, hh int64, fam []int64, endOfMonth time.Time) (money.Money, error) {
 	var bal money.Money
+	ph := inPh(fam)
+	datePh := "$" + strconv.Itoa(len(fam)+2)
 	err := a.Pool.QueryRow(ctx, `
-		SELECT COALESCE(a.opening_balance, 0)
-		 + COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
+		SELECT COALESCE((SELECT SUM(a.opening_balance) FROM account a
+		                  WHERE a.household_id = $1 AND a.id IN (`+ph+`)), 0)
+		+ COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.origin_type = 'account' AND t.origin_ref = $2
-		        AND t.transaction_date <= $3), 0)
-		 - COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
+		        AND t.origin_type = 'account' AND t.origin_ref IN (`+ph+`)
+		        AND t.transaction_date <= `+datePh+`), 0)
+		- COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.destination_type = 'account' AND t.destination_ref = $2
-		        AND t.transaction_date <= $3), 0)
-		 - COALESCE((SELECT SUM(p.amount) FROM payment p
-		              WHERE p.household_id = $1 AND p.account_id = $2
-		        AND p.ledger_transaction_id IS NULL
-		        AND p.payment_date <= $3), 0)
-		FROM account a WHERE a.id = $2 AND a.household_id = $1`, hh, card, endOfMonth).Scan(&bal)
+		        AND t.destination_type = 'account' AND t.destination_ref IN (`+ph+`)
+		        AND t.transaction_date <= `+datePh+`), 0)
+		- COALESCE((SELECT SUM(p.amount) FROM payment p
+		              WHERE p.household_id = $1 AND p.ledger_transaction_id IS NULL
+		        AND p.account_id IN (`+ph+`)
+		        AND p.payment_date <= `+datePh+`), 0)`,
+		append(append([]any{hh}, toAny(fam)...), endOfMonth)...).Scan(&bal)
 	return bal, err
 }
 
@@ -223,8 +236,17 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	fam, _, err := a.cardOperatingFamily(ctx, hh, cardID)
+	if err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	ph := inPh(fam)
+	mStartPh := "$" + strconv.Itoa(len(fam)+2)
+	mEndPh := "$" + strconv.Itoa(len(fam)+3)
+	baseArgs := append([]any{hh}, toAny(fam)...)
 
-	// Charges by person: expense splits on the card in the month.
+	// Charges by person: expense splits on the card family in the month.
 	var (
 		charges    []reconPivotCell
 		chargesTot money.Money
@@ -238,10 +260,10 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		JOIN "transaction" t ON t.id = s.transaction_id
 		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
 		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND s.participant_ref = cp.id
-		WHERE `+cardUnpaidWhere+`
-		  AND t.transaction_date >= $3 AND t.transaction_date <= $4
+		WHERE `+unpaidWhereFor(fam)+`
+		  AND t.transaction_date >= `+mStartPh+` AND t.transaction_date <= `+mEndPh+`
 		GROUP BY 1
-		ORDER BY 2 DESC, 1`, hh, cardID, monthStart, monthEnd)
+		ORDER BY 2 DESC, 1`, append(baseArgs, monthStart, monthEnd)...)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -262,7 +284,7 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Credits: ledger rows where the card is the destination, plus
+	// Credits: ledger rows where the card family is the destination, plus
 	// out-of-band payments (no ledger link) that reduce the balance.
 	var (
 		credits    []reconCreditLine
@@ -277,9 +299,9 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		FROM "transaction" t
 		LEFT JOIN merchant m ON m.id = t.merchant_id
 		WHERE t.household_id = $1 AND t.record_status <> 'void'
-		  AND t.destination_type = 'account' AND t.destination_ref = $2
-		  AND t.transaction_date >= $3 AND t.transaction_date <= $4
-		ORDER BY t.transaction_date, t.id`, hh, cardID, monthStart, monthEnd)
+		  AND t.destination_type = 'account' AND t.destination_ref IN (`+ph+`)
+		  AND t.transaction_date >= `+mStartPh+` AND t.transaction_date <= `+mEndPh+`
+		ORDER BY t.transaction_date, t.id`, append(baseArgs, monthStart, monthEnd)...)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -303,10 +325,10 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		SELECT p.payment_date, 'payment: ' || u.display_name, p.amount
 		FROM payment p
 		JOIN "user" u ON u.id = p.paid_by
-		WHERE p.household_id = $1 AND p.account_id = $2
+		WHERE p.household_id = $1 AND p.account_id IN (`+ph+`)
 		  AND p.ledger_transaction_id IS NULL
-		  AND p.payment_date >= $3 AND p.payment_date <= $4
-		ORDER BY p.payment_date, p.id`, hh, cardID, monthStart, monthEnd)
+		  AND p.payment_date >= `+mStartPh+` AND p.payment_date <= `+mEndPh+`
+		ORDER BY p.payment_date, p.id`, append(baseArgs, monthStart, monthEnd)...)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -342,10 +364,10 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
 		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND s.participant_ref = cp.id
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
-			FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
-		WHERE `+cardUnpaidWhere+`
-		  AND t.transaction_date >= $3 AND t.transaction_date <= $4
-		ORDER BY t.transaction_date, s.id`, hh, cardID, monthStart, monthEnd)
+		    FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
+		WHERE `+unpaidWhereFor(fam)+`
+		  AND t.transaction_date >= `+mStartPh+` AND t.transaction_date <= `+mEndPh+`
+		ORDER BY t.transaction_date, s.id`, append(baseArgs, monthStart, monthEnd)...)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -365,7 +387,7 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	recorded, err := a.cardRecordedAt(ctx, hh, cardID, monthEnd)
+	recorded, err := a.cardRecordedAtFamily(ctx, hh, fam, monthEnd)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -442,6 +464,11 @@ func (a *App) handleReconcileMonthPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	fam, _, err := a.cardOperatingFamily(ctx, hh, cardID)
+	if err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	actual, perr := money.Parse(r.FormValue("actual"))
 	if perr != nil || actual.IsNegative() {
@@ -452,7 +479,7 @@ func (a *App) handleReconcileMonthPost(w http.ResponseWriter, r *http.Request) {
 	}
 	note := r.FormValue("note")
 
-	recorded, err := a.cardRecordedAt(ctx, hh, cardID, monthStart.AddDate(0, 1, -1))
+	recorded, err := a.cardRecordedAtFamily(ctx, hh, fam, monthStart.AddDate(0, 1, -1))
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return

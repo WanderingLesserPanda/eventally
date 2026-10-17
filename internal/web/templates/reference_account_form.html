@@ -29,6 +29,14 @@
           <option value="supplementary" {{if eq .F.CardType "supplementary"}}selected{{end}}>supplementary</option>
         </select>
       </label>
+      {{if .F.ParentOpts}}
+      <label>Parent card <span class="muted small">(one level; roll-up happens at the parent)</span>
+        <select name="parent_id">
+          <option value="">— none (standalone or parent card) —</option>
+          {{range .F.Parents}}<option value="{{.ID}}" {{if eq $.F.ParentID .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      {{end}}
       <label>Credit limit
         <input type="text" name="credit_limit" value="{{if .F.HasCreditLim}}{{.F.CreditLimit}}{{end}}" placeholder="10000">
       </label>

@@ -8,13 +8,15 @@
   {{if .List}}
   {{$root := .}}
   <table>
-    <tr><th>Name</th><th>Type</th><th>Relationship</th><th></th></tr>
+    <tr><th>Name</th><th>Type</th><th>Relationship</th><th>Member</th><th class="money">Balance</th><th></th></tr>
     {{range .List}}
     <tr class="{{if not .Active}}inactive{{end}}">
       <td><a href="/counterparties/{{.ID}}">{{.Name}}</a>
         {{if not .Active}}<span class="tag">inactive</span>{{end}}</td>
       <td><span class="tag">{{.Type}}</span></td>
       <td>{{orDash .Relationship}}</td>
+      <td>{{orDash .UserName}}</td>
+      <td class="money">{{if .HasBalance}}{{money .Balance}}{{end}}</td>
       <td class="row-actions">
         <a class="btn small" href="/counterparties/{{.ID}}">Edit</a>
         <form method="post" action="/counterparties/{{.ID}}/deactivate" style="display:inline"

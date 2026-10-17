@@ -17,7 +17,8 @@
       <td><span class="tag">{{.Type}}</span> <span class="muted small">{{.BalanceType}}</span></td>
       <td class="money">{{if .HasCreditLim}}credit limit {{money .CreditLimit}}{{end}}</td>
       <td class="money">{{if .Opening}}{{money .Opening}}{{if .OpeningDate}} <span class="muted small">{{.OpeningDate}}</span>{{end}}{{end}}</td>
-      <td>{{if .CardType}}<span class="tag">{{.CardType}} card</span>{{else}}—{{end}}</td>
+      <td>{{if .CardType}}<span class="tag">{{.CardType}} card</span>{{else}}—{{end}}
+        {{if .ParentName}}<span class="muted small">of {{.ParentName}}</span>{{end}}</td>
       <td class="row-actions">
         <a class="btn small" href="/accounts/{{.ID}}">Edit</a>
         <form method="post" action="/accounts/{{.ID}}/deactivate" style="display:inline"
