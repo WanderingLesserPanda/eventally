@@ -16,6 +16,9 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata \
  && addgroup -S eventally && adduser -S -G eventally eventally
 COPY --from=build /out/eventally /usr/local/bin/eventally
+# Named volumes inherit ownership from the image path on first mount, so
+# /data must exist and be owned by the runtime user or receipt uploads fail.
+RUN mkdir -p /data && chown eventally:eventally /data
 USER eventally
 EXPOSE 8090
 # Templates are parsed from a CWD-relative path at startup; static JS/CSS
