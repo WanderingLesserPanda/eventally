@@ -55,7 +55,7 @@ func (a *App) Router() http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(a.sessionLoader)
 
-	r.Get("/static/*", http.StripPrefix("/static/", http.FileServerFS(staticFS)).ServeHTTP)
+	r.Get("/static/*", http.StripPrefix("/static/", http.FileServerFS(staticSub)).ServeHTTP)
 
 	// Phase P3: receipts are served by direct link (D14) — unauthenticated,
 	// home-LAN only, unguessable filename (timestamp-suffixed).

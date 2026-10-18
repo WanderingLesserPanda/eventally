@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"net/http"
 	"strings"
 	"time"
@@ -14,10 +15,24 @@ import (
 	"github.com/WanderingLesserPanda/eventally/internal/money"
 )
 
-// staticFS serves the vendored HTMX/Alpine assets offline.
+// staticFS serves the vendored HTMX/Alpine assets and app.css offline.
+// The embed directory is "static", so paths in the embedded FS carry that
+// prefix — staticSub is the FS rooted at it, which the /static/* route
+// (StripPrefix) serves against. Without the Sub, every request 404s:
+// the stripped path "app.css" is looked up at the FS root, where nothing
+// lives (the files sit under "static/").
 //
 //go:embed static
 var staticFS embed.FS
+
+// staticSub is staticFS rooted at the "static" directory.
+var staticSub = func() fs.FS {
+	s, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic(err) // cannot happen: the embed matched at build time
+	}
+	return s
+}()
 
 // context key for the verified session.
 type sessionCtxKey struct{}
