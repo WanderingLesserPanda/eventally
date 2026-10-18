@@ -33,11 +33,13 @@
   </div>
 </header>
 {{end}}
-<main class="container">
+<main class="container{{if eq .Path "/setup"}} container-full{{end}}">
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
 {{.Content}}
 </main>
+{{if ne .Path "/setup"}}
 <footer class="footer">Eventally — self-hosted household ledger</footer>
+{{end}}
 </body>
 </html>
 {{end}}

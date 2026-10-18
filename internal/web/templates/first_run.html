@@ -1,20 +1,118 @@
 {{define "page/first_run"}}
-<div class="card auth-card">
-  <h1>Welcome to Eventally</h1>
-  <p class="muted">Set up your household to get started. This takes a minute.</p>
-  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
-  <form method="post" action="/setup">
-    <label>Household name
-      <input type="text" name="household" required placeholder="e.g. Our Home" autofocus>
-    </label>
-    <label>Your username
-      <input type="text" name="username" required autocomplete="username">
-    </label>
-    <label>Your password
-      <input type="password" name="password" required minlength="8" autocomplete="new-password">
-    </label>
-    <p class="muted small">Base currency defaults to MYR — change it later in Settings. Add your partner from Settings → People.</p>
-    <button type="submit" class="btn-primary">Create household</button>
-  </form>
+{{if .Error}}<div class="error setup-error">{{.Error}}</div>{{end}}
+<div class="setup-wrap">
+  <div class="setup-card">
+    <aside class="setup-hero">
+      <h1>Welcome to<br>Eventally!</h1>
+    </aside>
+    <div class="setup-body">
+      <h2>Let&rsquo;s get started with the necessities.</h2>
+      <form method="post" action="/setup" class="setup-form">
+
+        <section class="setup-section">
+          <h3>Your account</h3>
+          <p class="setup-help">You&rsquo;re the first one here. That makes you the admin.</p>
+          <div class="setup-grid">
+            <div class="field">
+              <label for="username">Username</label>
+              <input id="username" type="text" name="username" placeholder="e.g. HandsomeBob01"
+                     autocomplete="username" value="{{.F.Username}}" required
+                     minlength="6" maxlength="30" pattern="[A-Za-z0-9]+"
+                     title="6-30 letters and numbers, no spaces or symbols">
+              <p class="help">6–30 characters, letters and numbers only. Your unique sign-in alias (case-insensitive) — choose wisely-ish.</p>
+            </div>
+            <div class="field">
+              <label for="display_name">Display Name</label>
+              <input id="display_name" type="text" name="display_name" placeholder="e.g. Bob"
+                     value="{{.F.DisplayName}}" required minlength="2" maxlength="60">
+              <p class="help">Shown on transactions, not used for signing in. 2–60 characters: letters, numbers, spaces, periods, commas.</p>
+            </div>
+          </div>
+          <div class="field">
+            <label for="email">Email Address</label>
+            <input id="email" type="email" name="email" placeholder="you@example.com"
+                   autocomplete="email" value="{{.F.Email}}" required maxlength="254">
+            <p class="help">Standard address, e.g. you@example.com — handy for receipts and reminders.</p>
+          </div>
+          <div class="setup-grid">
+            <div class="field">
+              <label for="password">Password</label>
+              <div class="pw-wrap">
+                <input id="password" type="password" name="password" placeholder="Enter a password" autocomplete="new-password">
+                <button type="button" class="eye" data-target="password" aria-label="Show or hide password">
+                  <svg class="ic-open" viewBox="0 0 24 24"><path d="M12 5c-5 0-8.6 4.2-9.8 6.2a.8.8 0 0 0 0 .8C3.4 14 7 18.2 12 18.2s8.6-4.2 9.8-6.2a.8.8 0 0 0 0-.8C20.6 9.2 17 5 12 5Zm0 11a4.4 4.4 0 1 1 0-8.8 4.4 4.4 0 0 1 0 8.8Zm0-2a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z"/></svg>
+                  <svg class="ic-closed" viewBox="0 0 24 24"><path d="M3.3 4.6 2 5.9l3.1 3.1C3.4 10.7 2.1 12.5 1.2 13.8a.8.8 0 0 0 0 .8C2.4 16.6 6 20.8 11 20.8c1.5 0 2.9-.4 4.2-1l3.4 3.4 1.3-1.3L3.3 4.6ZM11 18.8c-4-.2-7.2-3.6-8.3-5 .7-1 1.7-2.3 3-3.4l1.6 1.6a4.4 4.4 0 0 0 3.7 6.8Zm9.3-5c-1.1 1.4-4.3 4.8-8.3 5a4.4 4.4 0 0 0 3.8-6.7L17.5 14l1.6-1.6 1.2 1.4Z"/></svg>
+                </button>
+              </div>
+              <p class="help">8–64 characters. Long, unique, and definitely not &lsquo;password&rsquo; — symbols are fine.</p>
+            </div>
+            <div class="field">
+              <label for="confirm">Confirm Password</label>
+              <input id="confirm" type="password" name="confirm" placeholder="Re-enter Password"
+                     autocomplete="new-password">
+              <p class="help">Same, one more time.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="setup-section">
+          <h3>Your household</h3>
+          <p class="setup-help">Give your little corner of organised chaos a name.</p>
+          <div class="field">
+            <label for="household">Household Name</label>
+            <input id="household" type="text" name="household" placeholder="e.g. Our home"
+                   value="{{.F.HouseholdName}}" required minlength="3" maxlength="60">
+            <p class="help">3–60 characters: letters, numbers, spaces, periods, commas.</p>
+          </div>
+        </section>
+
+        <section class="setup-section">
+          <h3>Regional Preferences</h3>
+          <p class="setup-help">Your language, your currency, your idea of Monday.</p>
+          <div class="field">
+            <label for="language">Language</label>
+            <select id="language" name="language">
+              {{range .Langs}}<option value="{{.}}" {{if eq . $.F.Language}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+            <p class="help">English only, for now.</p>
+          </div>
+          <div class="setup-grid">
+            <div class="field">
+              <label for="currency">Default Currency</label>
+              <select id="currency" name="currency">
+                {{range .Currencies}}<option value="{{.}}" {{if eq . $.F.Currency}}selected{{end}}>{{.}}</option>{{end}}
+              </select>
+              <p class="help">Malaysia Ringgit, for now.</p>
+            </div>
+            <div class="field">
+              <label for="first_day">First day of the Week</label>
+              <select id="first_day" name="first_day">
+                {{range .FirstDays}}<option value="{{.Value}}" {{if eq .Value $.F.FirstDay}}selected{{end}}>{{.Label}}</option>{{end}}
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <div class="setup-foot">
+          <p class="muted small">Changed your mind? You can update them later.</p>
+          <button type="submit" class="btn-primary">Next <span class="arr">&rarr;</span></button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <p class="setup-tag">Your server. Your rules.</p>
 </div>
+<script>
+// Password show/hide (open eye = hidden, eye-slash = visible).
+document.querySelectorAll('.eye').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var input = document.getElementById(btn.dataset.target);
+    if (!input) return;
+    var show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.classList.toggle('on', show);
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  });
+});
+</script>
 {{end}}
