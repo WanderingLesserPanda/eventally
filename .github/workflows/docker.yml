@@ -36,6 +36,14 @@ jobs:
       - name: Run container against an empty root-owned bind mount
         run: |
           set -euo pipefail
+          # Clean up from any earlier run on a reused runner.
+          docker rm -f eventally-citest pg-test >/dev/null 2>&1 || true
+          # Mount point lives under a runner-owned dir: /tmp's sticky bit
+          # forbids a non-root user from stat-ing a root-owned dir there,
+          # and the bind-mount point starts root-owned (that's the case
+          # under test).
+          sudo rm -rf /tmp/eventally-test
+          mkdir -p /tmp/eventally-test
           # Postgres first (db.Open pings at startup; the app exits without it).
           docker run -d --name pg-test \
             -p 5433:5432 \
@@ -50,7 +58,7 @@ jobs:
             sleep 2
           done
           # Empty data dir created by root: the first-boot bind-mount case.
-          sudo mkdir -p /tmp/eventally-data
+          sudo mkdir -p /tmp/eventally-test/data
           # host-gateway: the app reaches Postgres on the runner's loopback
           # via host.docker.internal (no host networking on the app).
           docker run -d --name eventally-citest \
@@ -62,7 +70,7 @@ jobs:
             -e EVENTALLY_PG_PASSWORD=citest-0p1q2r3s4 \
             -e EVENTALLY_ADDR=:8090 \
             -e EVENTALLY_DATA_DIR=/data \
-            -v /tmp/eventally-data:/data \
+            -v /tmp/eventally-test/data:/data \
             eventally:ci-test
           for i in $(seq 1 60); do
             if curl -sf -o /dev/null http://127.0.0.1:8090/login; then
@@ -71,11 +79,18 @@ jobs:
             [ "$i" -eq 60 ] && { docker logs eventally-citest; exit 1; }
             sleep 2
           done
-          # The privilege drop must be in the app's log.
-          docker logs eventally-citest | grep -q "dropped privileges to uid=100" \
-            || { docker logs eventally-citest; exit 1; }
-          # The bind-mounted dir must now be owned by the app user.
-          owner=$(stat -c %u:%g /tmp/eventally-data)
+          # The privilege drop must be in the app's log. Capture to a file
+          # first: piping `docker logs` into `grep -q` under pipefail is a
+          # race (grep exits on first match, SIGPIPEs the log stream →
+          # spurious failure), so we grep the file instead.
+          docker logs eventally-citest > /tmp/eventally-test/app.log 2>&1
+          grep -q "dropped privileges to uid=100" /tmp/eventally-test/app.log \
+            || { cat /tmp/eventally-test/app.log; exit 1; }
+          # The bind-mounted dir must now be owned by the app user. sudo
+          # because the mount point starts root-owned (the case under test)
+          # and a non-root runner user can't reliably stat it.
+          owner=$(sudo stat -c %u:%g /tmp/eventally-test/data 2>&1) \
+            || { echo "stat failed: $owner"; exit 1; }
           [ "$owner" = "100:101" ] || { echo "data dir owner: $owner (want 100:101)"; exit 1; }
           echo "CI container test passed: privilege drop + bind-mount chown OK"
 
