@@ -12,14 +12,17 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/eventally ./cmd/eventally
 
 # --- Runtime stage -------------------------------------------------------
+# The container STARTS as root so the app can chown a bind-mounted (or
+# pre-existing) /data on first boot; the binary then drops privileges to
+# the "eventally" user before opening the server (cmd/eventally
+# dropPrivileges). No host-side chown is required.
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata \
  && addgroup -S eventally && adduser -S -G eventally eventally
 COPY --from=build /out/eventally /usr/local/bin/eventally
-# Named volumes inherit ownership from the image path on first mount, so
-# /data must exist and be owned by the runtime user or receipt uploads fail.
-RUN mkdir -p /data && chown eventally:eventally /data
-USER eventally
+# /data must exist so bind/named mounts have a target; ownership is fixed
+# at first boot by the app itself.
+RUN mkdir -p /data
 EXPOSE 8090
 # Templates are parsed from a CWD-relative path at startup; static JS/CSS
 # is compiled into the binary via go:embed, so only the templates need

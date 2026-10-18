@@ -16,6 +16,69 @@ env:
   IMAGE_NAME: ghcr.io/wanderinglesserpanda/eventally
 
 jobs:
+  # Runs the freshly built image as a real container before it is pushed,
+  # verifying the root->eventally privilege drop works on an empty
+  # (root-owned) bind mount — the TrueNAS first-boot scenario.
+  container-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image (local load only)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: eventally:ci-test
+
+      - name: Run container against an empty root-owned bind mount
+        run: |
+          set -euo pipefail
+          # Postgres first (db.Open pings at startup; the app exits without it).
+          docker run -d --name pg-test \
+            -p 5433:5432 \
+            -e POSTGRES_USER=eventally -e POSTGRES_PASSWORD=*** \
+            -e POSTGRES_DB=eventally \
+            postgres:17-alpine
+          for i in $(seq 1 60); do
+            if docker exec pg-test pg_isready -U eventally -d eventally >/dev/null 2>&1; then
+              echo "postgres ready"; break
+            fi
+            [ "$i" -eq 60 ] && { docker logs pg-test; exit 1; }
+            sleep 2
+          done
+          # Empty data dir created by root: the first-boot bind-mount case.
+          sudo mkdir -p /tmp/eventally-data
+          # host-gateway: the app reaches Postgres on the runner's loopback
+          # via host.docker.internal (no host networking on the app).
+          docker run -d --name eventally-citest \
+            --add-host=host.docker.internal:host-gateway \
+            -p 8090:8090 \
+            -e EVENTALLY_SECRET=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e EVENTALLY_PG_HOST=host.docker.internal -e EVENTALLY_PG_PORT=5433 \
+            -e EVENTALLY_PG_DATABASE=eventally -e EVENTALLY_PG_USER=eventally \
+            -e EVENTALLY_PG_PASSWORD=*** \
+            -e EVENTALLY_ADDR=:8090 \
+            -e EVENTALLY_DATA_DIR=/data \
+            -v /tmp/eventally-data:/data \
+            eventally:ci-test
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:8090/login; then
+              echo "server responding on /login"; break
+            fi
+            [ "$i" -eq 60 ] && { docker logs eventally-citest; exit 1; }
+            sleep 2
+          done
+          # The privilege drop must be in the app's log.
+          docker logs eventally-citest | grep -q "dropped privileges to uid=100" \
+            || { docker logs eventally-citest; exit 1; }
+          # The bind-mounted dir must now be owned by the app user.
+          owner=$(stat -c %u:%g /tmp/eventally-data)
+          [ "$owner" = "100:101" ] || { echo "data dir owner: $owner (want 100:101)"; exit 1; }
+          echo "CI container test passed: privilege drop + bind-mount chown OK"
+
   build-push:
     runs-on: ubuntu-latest
     steps:
