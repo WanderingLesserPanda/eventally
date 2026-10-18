@@ -39,7 +39,7 @@ jobs:
           # Postgres first (db.Open pings at startup; the app exits without it).
           docker run -d --name pg-test \
             -p 5433:5432 \
-            -e POSTGRES_USER=eventally -e POSTGRES_PASSWORD=*** \
+            -e POSTGRES_USER=eventally -e POSTGRES_PASSWORD=citest-0p1q2r3s4 \
             -e POSTGRES_DB=eventally \
             postgres:17-alpine
           for i in $(seq 1 60); do
@@ -59,7 +59,7 @@ jobs:
             -e EVENTALLY_SECRET=0000000000000000000000000000000000000000000000000000000000000000 \
             -e EVENTALLY_PG_HOST=host.docker.internal -e EVENTALLY_PG_PORT=5433 \
             -e EVENTALLY_PG_DATABASE=eventally -e EVENTALLY_PG_USER=eventally \
-            -e EVENTALLY_PG_PASSWORD=*** \
+            -e EVENTALLY_PG_PASSWORD=citest-0p1q2r3s4 \
             -e EVENTALLY_ADDR=:8090 \
             -e EVENTALLY_DATA_DIR=/data \
             -v /tmp/eventally-data:/data \
