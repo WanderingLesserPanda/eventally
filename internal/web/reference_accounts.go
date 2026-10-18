@@ -92,6 +92,27 @@ type Account struct {
 	ParentName   string
 }
 
+// accountListRow is one card in the accounts grid: the stored account
+// plus its live ledger balance (opening + activity since).
+type accountListRow struct {
+	Account
+	Live      money.Money
+	HasLive   bool
+	IsCredit  bool // liability account: balance reads as owed, not owned
+	IsChild   bool // supplementary card hidden from the top-level grid
+	Utilized  float64 // credit cards only: balance/limit, 0..1+
+	Children  int    // card family: supplementary cards under this parent
+}
+
+// accountSummary is the top-of-page strip: what the household owns,
+// owes, and has in total, across active accounts.
+type accountSummary struct {
+	Assets    money.Money
+	Liabilities money.Money
+	NetWorth  money.Money
+	ActiveCount int
+}
+
 const accountSelect = `a.id, a.name, a.institution, a.account_type, a.balance_type,
 	COALESCE(a.card_type, ''), COALESCE(a.credit_limit, 0), a.credit_limit IS NOT NULL,
 	COALESCE(a.statement_day, 0), a.statement_day IS NOT NULL,
@@ -104,34 +125,133 @@ const accountFrom = `FROM account a
 
 var accountTypes = []string{"savings", "ewallet", "credit_card", "loan", "investment", "cash", "credits"}
 
+// accountLiveBalance is the ledger position of one account:
+// opening + activity with the account as origin − activity as
+// destination (non-void transactions only). Card families are summed
+// across their members before netting, so a parent's roll-up matches
+// the card view (D19).
+func (a *App) accountLiveBalance(ctx context.Context, hh int64, ids []int64) (money.Money, error) {
+	ph := inPh(ids)
+	var bal money.Money
+	err := a.Pool.QueryRow(ctx, `
+		SELECT COALESCE((SELECT SUM(x.opening_balance) FROM account x
+		                  WHERE x.household_id = $1 AND x.id IN (`+ph+`)), 0)
+		 + COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
+			           WHERE t.household_id = $1 AND t.record_status <> 'void'
+			             AND t.origin_type = 'account' AND t.origin_ref IN (`+ph+`)), 0)
+		 - COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
+			           WHERE t.household_id = $1 AND t.record_status <> 'void'
+			             AND t.destination_type = 'account' AND t.destination_ref IN (`+ph+`)), 0)`,
+		append([]any{hh}, toAny(ids)...)...).Scan(&bal)
+	return bal, err
+}
+
 func (a *App) listAccounts(w http.ResponseWriter, r *http.Request) {
-	hh := sessionFromContext(r.Context()).Household
-	rows, err := a.Pool.Query(r.Context(),
+	ctx := r.Context()
+	hh := sessionFromContext(ctx).Household
+	rows, err := a.Pool.Query(ctx,
 		fmt.Sprintf(`SELECT %s %s WHERE a.household_id = $1 ORDER BY a.is_active DESC, a.sort_order, a.name`, accountSelect, accountFrom), hh)
 	if err != nil {
 		http.Error(w, "list accounts: "+err.Error(), 500)
 		return
 	}
 	defer rows.Close()
-	var list []Account
+	var list []accountListRow
 	for rows.Next() {
-		var ac Account
-		if err := rows.Scan(&ac.ID, &ac.Name, &ac.Institution, &ac.Type, &ac.BalanceType,
-			&ac.CardType, &ac.CreditLimit, &ac.HasCreditLim,
-			&ac.StatementDay, &ac.HasStmtDay,
-			&ac.PaymentDue, &ac.HasPayDue,
-			&ac.Opening, &ac.OpeningDate, &ac.Active, &ac.Notes,
-			&ac.ParentID, &ac.ParentName); err != nil {
+		var r accountListRow
+		if err := rows.Scan(&r.ID, &r.Name, &r.Institution, &r.Type, &r.BalanceType,
+			&r.CardType, &r.CreditLimit, &r.HasCreditLim,
+			&r.StatementDay, &r.HasStmtDay,
+			&r.PaymentDue, &r.HasPayDue,
+			&r.Opening, &r.OpeningDate, &r.Active, &r.Notes,
+			&r.ParentID, &r.ParentName); err != nil {
 			http.Error(w, "scan account: "+err.Error(), 500)
 			return
 		}
-		list = append(list, ac)
+		r.IsCredit = r.BalanceType == "liability"
+		list = append(list, r)
 	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "list accounts: "+err.Error(), 500)
+		return
+	}
+
+	// Card families: a parent rolls up its active supplementary cards
+	// (D19); children are hidden from the grid to avoid double-counting
+	// the balance, but stay listed under their family.
+	childOf := map[int64]bool{}
+	childCount := map[int64]int{}
+	crows, cerr := a.Pool.Query(ctx, `
+		SELECT parent_id, count(*) FROM account
+		WHERE household_id = $1 AND parent_id IS NOT NULL AND is_active
+		GROUP BY parent_id`, hh)
+	if cerr == nil {
+		for crows.Next() {
+			var pid int64
+			var n int
+			if crows.Scan(&pid, &n) == nil {
+				childCount[pid] = n
+			}
+		}
+		crows.Close()
+	}
+	for _, r := range list {
+		if r.Active && r.ParentID > 0 {
+			childOf[r.ID] = true
+		}
+	}
+	for i := range list {
+		if list[i].ParentID > 0 {
+			list[i].Children = childCount[list[i].ParentID]
+		}
+		list[i].IsChild = childOf[list[i].ID]
+	}
+
+	// Live balances: per top-level account, card families summed first.
+	for i, r := range list {
+		if childOf[r.ID] {
+			continue
+		}
+		fam := []int64{r.ID}
+		for _, c := range list {
+			if c.ParentID == r.ID && c.Active {
+				fam = append(fam, c.ID)
+			}
+		}
+		bal, err := a.accountLiveBalance(ctx, hh, fam)
+		if err != nil {
+			http.Error(w, "live balance: "+err.Error(), 500)
+			return
+		}
+		list[i].Live = bal
+		list[i].HasLive = true
+		if list[i].IsCredit && list[i].HasCreditLim && list[i].CreditLimit > 0 {
+			list[i].Utilized = float64(bal) / float64(list[i].CreditLimit)
+		}
+	}
+
+	// Summary strip over active top-level accounts only.
+	var sum accountSummary
+	for _, r := range list {
+		if !r.Active || childOf[r.ID] {
+			continue
+		}
+		sum.ActiveCount++
+		if r.IsCredit {
+			sum.Liabilities = sum.Liabilities.Add(r.Live)
+		} else {
+			sum.Assets = sum.Assets.Add(r.Live)
+		}
+	}
+	sum.NetWorth = sum.Assets.Sub(sum.Liabilities)
+
 	a.render(w, r, 200, "reference_accounts.html", map[string]any{
 		"Title":   "Accounts",
 		"Flash":   flashFrom(r),
 		"Section": "accounts",
 		"List":    list,
+		"ChildOf": childOf,
+		"Summary": sum,
 	})
 }
 

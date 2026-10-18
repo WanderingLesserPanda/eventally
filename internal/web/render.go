@@ -117,3 +117,60 @@ func containsStr(list []string, v string) bool {
 	}
 	return false
 }
+
+// acctIcon is the per-account-type glyph used in the accounts grid.
+func acctIcon(t string) string {
+	switch t {
+	case "savings":
+		return "🏦"
+	case "ewallet":
+		return "📱"
+	case "credit_card":
+		return "💳"
+	case "loan":
+		return "🧾"
+	case "investment":
+		return "📈"
+	case "cash":
+		return "💵"
+	case "credits":
+		return "🎟️"
+	default:
+		return "💠"
+	}
+}
+
+// acctTypeLabel is the human-facing account type name.
+func acctTypeLabel(t string) string {
+	switch t {
+	case "savings":
+		return "Savings"
+	case "ewallet":
+		return "E-wallet"
+	case "credit_card":
+		return "Credit card"
+	case "loan":
+		return "Loan"
+	case "investment":
+		return "Investment"
+	case "cash":
+		return "Cash"
+	case "credits":
+		return "Credits"
+	default:
+		return t
+	}
+}
+
+// utilPct renders a 0..1 fraction as a clamped integer percent (credit
+// utilisation bars; over-limit reads as 100, not a broken width).
+func utilPct(f float64) int {
+	p := int(f*100 + 0.5)
+	if p < 0 {
+		p = 0
+	}
+	if p > 100 {
+		p = 100
+	}
+	return p
+}

@@ -1,37 +1,104 @@
 {{define "page/reference_accounts"}}
-<div class="card">
-  <div class="page-head">
-    <h1>Accounts</h1>
-    <a class="btn-primary" href="/accounts/new">＋ New account</a>
-  </div>
-  <p class="muted small">Where money sits: savings, e-wallets, cards, cash. Deactivated accounts stay for history.</p>
-  {{if .List}}
-  {{$root := .}}
-  <table>
-    <tr><th>Name</th><th>Type</th><th>Balance</th><th class="money">Opening</th><th>Card</th><th></th></tr>
-    {{range .List}}
-    <tr class="{{if not .Active}}inactive{{end}}">
-      <td><a href="/accounts/{{.ID}}">{{.Name}}</a>
-        {{if .Institution}}<span class="muted small">· {{.Institution}}</span>{{end}}
-        {{if not .Active}}<span class="tag">inactive</span>{{end}}</td>
-      <td><span class="tag">{{.Type}}</span> <span class="muted small">{{.BalanceType}}</span></td>
-      <td class="money">{{if .HasCreditLim}}credit limit {{money .CreditLimit}}{{end}}</td>
-      <td class="money">{{if .Opening}}{{money .Opening}}{{if .OpeningDate}} <span class="muted small">{{.OpeningDate}}</span>{{end}}{{end}}</td>
-      <td>{{if .CardType}}<span class="tag">{{.CardType}} card</span>{{else}}—{{end}}
-        {{if .ParentName}}<span class="muted small">of {{.ParentName}}</span>{{end}}</td>
-      <td class="row-actions">
-        <a class="btn small" href="/accounts/{{.ID}}">Edit</a>
-        <form method="post" action="/accounts/{{.ID}}/deactivate" style="display:inline"
-              onsubmit="return confirm('Deactivate {{.Name}}? It stays in history.')">
-          {{template "csrf" $root}}
-          <button class="btn btn-danger small">Deactivate</button>
-        </form>
-      </td>
-    </tr>
-    {{end}}
-  </table>
-  {{else}}
-  <p>No accounts yet — add your first one to start recording.</p>
-  {{end}}
+<div class="page-head acct-head">
+  <h1>Accounts</h1>
+  <a class="btn-primary" href="/accounts/new">＋ New account</a>
 </div>
+
+{{if .List}}
+{{$root := .}}
+{{$anyInactive := false}}
+{{range .List}}{{if not .Active}}{{$anyInactive = true}}{{end}}{{end}}
+
+<div class="acct-hero">
+  <div class="acct-stat hero-stat">
+    <span class="stat-label">Net worth</span>
+    <span class="stat-value {{if .Summary.NetWorth.IsNegative}}neg{{end}}">{{money .Summary.NetWorth}}</span>
+    <span class="stat-sub">across {{.Summary.ActiveCount}} active account{{if ne .Summary.ActiveCount 1}}s{{end}}</span>
+  </div>
+  <div class="acct-stat">
+    <span class="stat-label">Assets</span>
+    <span class="stat-value pos">{{money .Summary.Assets}}</span>
+    <span class="stat-sub">where your money sits</span>
+  </div>
+  <div class="acct-stat">
+    <span class="stat-label">Owed</span>
+    <span class="stat-value {{if .Summary.Liabilities.IsNegative}}pos{{else}}neg{{end}}">{{money .Summary.Liabilities}}</span>
+    <span class="stat-sub">cards &amp; loans</span>
+  </div>
+</div>
+
+<div class="acct-groups">
+  <div class="acct-group-label">Assets</div>
+  <div class="acct-grid">
+    {{range .List}}
+      {{if and .Active (not .IsChild) (not .IsCredit)}}
+      <a class="acct-card" href="/accounts/{{.ID}}">
+        <div class="acct-top">
+          <span class="acct-ic">{{icon .Type}}</span>
+          <div class="acct-id">
+            <span class="acct-name">{{.Name}}{{if .Institution}}<span class="acct-inst">{{.Institution}}</span>{{end}}</span>
+            <span class="acct-sub">{{humanType .Type}}{{if .Children}} · {{.Children}} card{{if ne .Children 1}}s{{end}} in this family{{end}}</span>
+          </div>
+        </div>
+        <div class="acct-bal">{{money .Live}}</div>
+      </a>
+      {{end}}
+    {{end}}
+  </div>
+
+  <div class="acct-group-label">Liabilities</div>
+  <div class="acct-grid">
+    {{range .List}}
+      {{if and .Active (not .IsChild) .IsCredit}}
+      <a class="acct-card liab" href="/accounts/{{.ID}}">
+        <div class="acct-top">
+          <span class="acct-ic">{{icon .Type}}</span>
+          <div class="acct-id">
+            <span class="acct-name">{{.Name}}{{if .Institution}}<span class="acct-inst">{{.Institution}}</span>{{end}}</span>
+            <span class="acct-sub">{{humanType .Type}}{{if .CardType}} · {{.CardType}}{{if .ParentName}} · of {{.ParentName}}{{end}}{{end}}</span>
+          </div>
+        </div>
+        <div class="acct-bal owed">−{{money .Live}}</div>
+        {{if and .HasCreditLim (gt .CreditLimit 0)}}
+        <div class="acct-usage">
+          <div class="acct-usage-bar"><span style="width: {{utilPct .Utilized}}%"></span></div>
+          <span class="acct-usage-label">{{utilPct .Utilized}}% of {{money .CreditLimit}} used</span>
+        </div>
+        {{end}}
+      </a>
+      {{end}}
+    {{end}}
+  </div>
+</div>
+
+{{if $anyInactive}}
+<details class="acct-inactive">
+  <summary>Inactive accounts — history keeps their references</summary>
+  <div class="acct-grid">
+    {{range .List}}
+      {{if not .Active}}
+      <a class="acct-card muted-card" href="/accounts/{{.ID}}">
+        <div class="acct-top">
+          <span class="acct-ic">{{icon .Type}}</span>
+          <div class="acct-id">
+            <span class="acct-name">{{.Name}}{{if .Institution}}<span class="acct-inst">{{.Institution}}</span>{{end}}</span>
+            <span class="acct-sub">{{humanType .Type}} · inactive</span>
+          </div>
+        </div>
+        <div class="acct-bal">—</div>
+      </a>
+      {{end}}
+    {{end}}
+  </div>
+</details>
+{{end}}
+
+{{else}}
+<div class="card acct-empty">
+  <div class="acct-empty-ic">🏦</div>
+  <h2>No accounts yet</h2>
+  <p class="muted">Add your first one — a savings account, a credit card, some cash — and its balance will roll up here.</p>
+  <a class="btn-primary" href="/accounts/new">Add your first account</a>
+</div>
+{{end}}
 {{end}}
