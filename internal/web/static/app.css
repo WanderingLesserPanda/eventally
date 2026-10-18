@@ -43,7 +43,7 @@ label.checkline input { width: auto; margin: 0 0.3rem 0 0; }
 .auth-card { max-width: 420px; margin: 4rem auto; }
 h1 { font-size: 1.35rem; margin: 0 0 0.4rem; }
 label { display: block; margin-bottom: 0.9rem; font-weight: 600; font-size: 0.85rem; }
-input[type=text], input[type=password], input[type=date], input[type=number], input[type=search], select, textarea {
+input[type=text], input[type=password], input[type=email], input[type=date], input[type=number], input[type=search], select, textarea {
   display: block; width: 100%; margin-top: 0.25rem;
   padding: 0.5rem 0.6rem; border: 1px solid var(--line); border-radius: 8px;
   font: inherit; background: #fff;
@@ -109,7 +109,7 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
 
 /* Initial setup page (first run): orange backdrop, two-panel card. */
 .setup-wrap {
-  min-height: calc(100vh - 4rem);
+  min-height: 100vh;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   background: linear-gradient(160deg, #f5a04c 0%, #ef8a2b 55%, #e97c1a 100%);
   padding: 2rem 1rem;
@@ -135,8 +135,9 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
 .setup-body { padding: 1.8rem 2rem 1.4rem; }
 .setup-body > h2 { font-size: 1.15rem; margin: 0 0 1rem; }
 .setup-form hr, .setup-section + .setup-section {
-  border: 0; border-top: 1px solid var(--line); margin: 1.2rem 0;
+  border: 0; border-top: 1px solid var(--line); margin: 1.8rem 0 1.2rem;
 }
+.setup-wrap input::placeholder { font-style: italic; }
 .setup-section h3 { font-size: 1rem; margin: 0 0 0.1rem; }
 .setup-help { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.9rem; }
 .setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.2rem; }

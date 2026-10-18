@@ -18,38 +18,46 @@
               <input id="username" type="text" name="username" placeholder="e.g. HandsomeBob01"
                      autocomplete="username" value="{{.F.Username}}" required
                      minlength="6" maxlength="30" pattern="[A-Za-z0-9]+"
-                     title="6-30 letters and numbers, no spaces or symbols">
-              <p class="help">6–30 characters, letters and numbers only. Your unique sign-in alias (case-insensitive) — choose wisely-ish.</p>
+                     title="6 - 30 characters, letters and numbers only.">
+              <p class="help">Your sign-in alias, choose wisely-ish.</p>
             </div>
             <div class="field">
               <label for="display_name">Display Name</label>
               <input id="display_name" type="text" name="display_name" placeholder="e.g. Bob"
-                     value="{{.F.DisplayName}}" required minlength="2" maxlength="60">
-              <p class="help">Shown on transactions, not used for signing in. 2–60 characters: letters, numbers, spaces, periods, commas.</p>
+                     value="{{.F.DisplayName}}" required minlength="2" maxlength="60"
+                     title="2 - 60 characters, letters, numbers, spaces, periods, and commas only.">
+              <p class="help">Shown on transactions. Keep it friendly.</p>
             </div>
           </div>
           <div class="field">
             <label for="email">Email Address</label>
             <input id="email" type="email" name="email" placeholder="you@example.com"
                    autocomplete="email" value="{{.F.Email}}" required maxlength="254">
-            <p class="help">Standard address, e.g. you@example.com — handy for receipts and reminders.</p>
+            <p class="help">Handy for reminders.</p>
           </div>
           <div class="setup-grid">
             <div class="field">
               <label for="password">Password</label>
               <div class="pw-wrap">
-                <input id="password" type="password" name="password" placeholder="Enter a password" autocomplete="new-password">
+                <input id="password" type="password" name="password" placeholder="Enter a password"
+                       autocomplete="new-password" title="8 - 64 characters only">
                 <button type="button" class="eye" data-target="password" aria-label="Show or hide password">
                   <svg class="ic-open" viewBox="0 0 24 24"><path d="M12 5c-5 0-8.6 4.2-9.8 6.2a.8.8 0 0 0 0 .8C3.4 14 7 18.2 12 18.2s8.6-4.2 9.8-6.2a.8.8 0 0 0 0-.8C20.6 9.2 17 5 12 5Zm0 11a4.4 4.4 0 1 1 0-8.8 4.4 4.4 0 0 1 0 8.8Zm0-2a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z"/></svg>
                   <svg class="ic-closed" viewBox="0 0 24 24"><path d="M3.3 4.6 2 5.9l3.1 3.1C3.4 10.7 2.1 12.5 1.2 13.8a.8.8 0 0 0 0 .8C2.4 16.6 6 20.8 11 20.8c1.5 0 2.9-.4 4.2-1l3.4 3.4 1.3-1.3L3.3 4.6ZM11 18.8c-4-.2-7.2-3.6-8.3-5 .7-1 1.7-2.3 3-3.4l1.6 1.6a4.4 4.4 0 0 0 3.7 6.8Zm9.3-5c-1.1 1.4-4.3 4.8-8.3 5a4.4 4.4 0 0 0 3.8-6.7L17.5 14l1.6-1.6 1.2 1.4Z"/></svg>
                 </button>
               </div>
-              <p class="help">8–64 characters. Long, unique, and definitely not &lsquo;password&rsquo; — symbols are fine.</p>
+              <p class="help">Long, unique, and definitely not &lsquo;password&rsquo;, symbols are fine.</p>
             </div>
             <div class="field">
               <label for="confirm">Confirm Password</label>
-              <input id="confirm" type="password" name="confirm" placeholder="Re-enter Password"
-                     autocomplete="new-password">
+              <div class="pw-wrap">
+                <input id="confirm" type="password" name="confirm" placeholder="Re-enter Password"
+                       autocomplete="new-password">
+                <button type="button" class="eye" data-target="confirm" aria-label="Show or hide password">
+                  <svg class="ic-open" viewBox="0 0 24 24"><path d="M12 5c-5 0-8.6 4.2-9.8 6.2a.8.8 0 0 0 0 .8C3.4 14 7 18.2 12 18.2s8.6-4.2 9.8-6.2a.8.8 0 0 0 0-.8C20.6 9.2 17 5 12 5Zm0 11a4.4 4.4 0 1 1 0-8.8 4.4 4.4 0 0 1 0 8.8Zm0-2a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z"/></svg>
+                  <svg class="ic-closed" viewBox="0 0 24 24"><path d="M3.3 4.6 2 5.9l3.1 3.1C3.4 10.7 2.1 12.5 1.2 13.8a.8.8 0 0 0 0 .8C2.4 16.6 6 20.8 11 20.8c1.5 0 2.9-.4 4.2-1l3.4 3.4 1.3-1.3L3.3 4.6ZM11 18.8c-4-.2-7.2-3.6-8.3-5 .7-1 1.7-2.3 3-3.4l1.6 1.6a4.4 4.4 0 0 0 3.7 6.8Zm9.3-5c-1.1 1.4-4.3 4.8-8.3 5a4.4 4.4 0 0 0 3.8-6.7L17.5 14l1.6-1.6 1.2 1.4Z"/></svg>
+                </button>
+              </div>
               <p class="help">Same, one more time.</p>
             </div>
           </div>
@@ -61,8 +69,8 @@
           <div class="field">
             <label for="household">Household Name</label>
             <input id="household" type="text" name="household" placeholder="e.g. Our home"
-                   value="{{.F.HouseholdName}}" required minlength="3" maxlength="60">
-            <p class="help">3–60 characters: letters, numbers, spaces, periods, commas.</p>
+                   value="{{.F.HouseholdName}}" required minlength="3" maxlength="60"
+                   title="3 - 60 characters, letters, numbers, spaces, periods, and commas only.">
           </div>
         </section>
 
