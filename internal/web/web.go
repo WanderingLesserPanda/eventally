@@ -46,6 +46,19 @@ func New(pool *pgxpool.Pool, tmplDir, dataDir string) (*App, error) {
 	return &App{Pool: pool, Sessions: auth.NewStore(pool), Tmpl: tmpl, DataDir: dataDir}, nil
 }
 
+// staticCacheControl wraps a handler so static assets are never served
+// from browser cache without revalidation. The files are unversioned
+// (/static/app.css, not /static/app.20261018.css), so a stale cached
+// copy outlives image upgrades; "no-cache" forces a conditional
+// revalidation request while still letting the browser reuse the copy
+// when the server confirms it is unchanged (304, no re-download).
+func staticCacheControl(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next(w, r)
+	}
+}
+
 // Router builds the chi mux with middleware and all routes.
 func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
@@ -55,7 +68,7 @@ func (a *App) Router() http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(a.sessionLoader)
 
-	r.Get("/static/*", http.StripPrefix("/static/", http.FileServerFS(staticSub)).ServeHTTP)
+	r.Get("/static/*", staticCacheControl(http.StripPrefix("/static/", http.FileServerFS(staticSub)).ServeHTTP))
 
 	// Phase P3: receipts are served by direct link (D14) — unauthenticated,
 	// home-LAN only, unguessable filename (timestamp-suffixed).
@@ -185,14 +198,16 @@ func (a *App) requireCSRF(next http.Handler) http.Handler {
 	})
 }
 
-// handleLogin renders the login form, or the first-run setup page when no
-// household exists yet.
+// handleLogin renders the login form. With no household yet, the first-run
+// setup page owns first contact: /setup renders the full form (options,
+// preselected defaults, full-bleed layout), so redirect there instead of
+// rendering a degraded copy inline at /login (which lacks the template
+// data and the /setup path, and used to show blank selects + a boxed
+// gradient + the footer).
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	n, _ := a.countHouseholds(r.Context())
 	if n == 0 {
-		a.render(w, r, http.StatusOK, "first_run.html", map[string]any{
-			"Title": "Welcome to Eventally",
-		})
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
 	a.render(w, r, http.StatusOK, "login.html", map[string]any{

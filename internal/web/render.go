@@ -90,6 +90,13 @@ func (a *App) render(w http.ResponseWriter, r *http.Request, status int, name st
 	data["Path"] = r.URL.Path
 	data["Year"] = time.Now().Year()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// HTML is never cached: the app ships unversioned assets and upgrades by
+	// swapping the container image (docker compose pull). Without this, a
+	// browser can keep serving a stale page after an upgrade. Force a
+	// revalidation on every load.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	w.WriteHeader(status)
 	// Two-stage render: execute the page template into a buffer, then the
 	// layout with the page HTML as .Content (safeHTML skips escaping).

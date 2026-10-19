@@ -8,7 +8,7 @@
 <script src="/static/htmx.min.js" defer></script>
 <script src="/static/alpine.min.js" defer></script>
 </head>
-<body>
+<body{{if eq .Path "/setup"}} class="setup-page"{{end}}>
 {{if .Session}}
 <header class="topbar">
   <a class="brand" href="/">Eventally</a>

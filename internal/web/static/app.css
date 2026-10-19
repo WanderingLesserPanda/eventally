@@ -111,8 +111,15 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
 .setup-wrap {
   min-height: 100vh;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: linear-gradient(160deg, #f5a04c 0%, #ef8a2b 55%, #e97c1a 100%);
   padding: 2rem 1rem;
+}
+/* The gradient lives on <body> for the setup page: a body background is
+   propagated to the canvas, which is guaranteed to cover the ENTIRE
+   viewport (full width and full scroll height) no matter how the inner
+   elements size. Putting it on an inner div instead could shrink to a
+   box if that element's width/height were ever constrained. */
+body.setup-page {
+  background: linear-gradient(160deg, #f5a04c 0%, #ef8a2b 55%, #e97c1a 100%);
 }
 .setup-error {
   max-width: 860px; width: 100%; margin: 0 auto 0.8rem;
@@ -135,7 +142,9 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
 .setup-body { padding: 1.8rem 2rem 1.4rem; }
 .setup-body > h2 { font-size: 1.15rem; margin: 0 0 1rem; }
 .setup-form hr, .setup-section + .setup-section {
-  border: 0; border-top: 1px solid var(--line); margin: 1.8rem 0 1.2rem;
+  border: 0; border-top: 1px solid var(--line);
+  margin-top: 1.2rem;   /* gap ABOVE the line (from the section above) */
+  padding-top: 1.6rem;  /* gap BELOW the line (line -> heading) */
 }
 .setup-wrap input::placeholder { font-style: italic; }
 .setup-section h3 { font-size: 1rem; margin: 0 0 0.1rem; }
