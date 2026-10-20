@@ -1,25 +1,25 @@
-{{define "page/reference_counterparties"}}
+{{define "page/reference_parties"}}
 <div class="card">
   <div class="page-head">
-    <h1>Counterparties</h1>
-    <a class="btn-primary" href="/counterparties/new">＋ New counterparty</a>
+    <h1>Parties</h1>
+    <a class="btn-primary" href="/parties/new">＋ New party</a>
   </div>
-  <p class="muted small">People or organisations outside the household that money moves to/from — used in splits.</p>
+  <p class="muted small">People or organisations money moves to/from — used in splits and as transaction endpoints. Household members get a party row automatically.</p>
   {{if .List}}
   {{$root := .}}
   <table>
     <tr><th>Name</th><th>Type</th><th>Relationship</th><th>Member</th><th class="money">Balance</th><th></th></tr>
     {{range .List}}
     <tr class="{{if not .Active}}inactive{{end}}">
-      <td><a href="/counterparties/{{.ID}}">{{.Name}}</a>
+      <td><a href="/parties/{{.ID}}">{{.Name}}</a>
         {{if not .Active}}<span class="tag">inactive</span>{{end}}</td>
       <td><span class="tag">{{.Type}}</span></td>
       <td>{{orDash .Relationship}}</td>
       <td>{{orDash .UserName}}</td>
       <td class="money">{{if .HasBalance}}{{money .Balance}}{{end}}</td>
       <td class="row-actions">
-        <a class="btn small" href="/counterparties/{{.ID}}">Edit</a>
-        <form method="post" action="/counterparties/{{.ID}}/deactivate" style="display:inline"
+        <a class="btn small" href="/parties/{{.ID}}">Edit</a>
+        <form method="post" action="/parties/{{.ID}}/deactivate" style="display:inline"
               onsubmit="return confirm('Deactivate {{.Name}}? It stays in history.')">
           {{template "csrf" $root}}
           <button class="btn btn-danger small">Deactivate</button>
@@ -29,7 +29,7 @@
     {{end}}
   </table>
   {{else}}
-  <p>No counterparties yet.</p>
+  <p>No parties yet.</p>
   {{end}}
 </div>
 {{end}}

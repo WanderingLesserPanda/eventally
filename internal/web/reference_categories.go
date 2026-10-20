@@ -31,10 +31,10 @@ type Category struct {
 // (which joins the parent). The edit handler uses its own unqualified
 // SELECT against the single row.
 const categorySelectList = `c.id, c.name, COALESCE(c.parent_id, 0), COALESCE(p.name, ''), c.transaction_class,
-	COALESCE(c.budget_per_month, 0), c.budget_per_month IS NOT NULL, c.budgetable, c.is_active`
+	COALESCE(c.budget_per_month, 0), c.budget_per_month IS NOT NULL, c.is_budgetable, c.is_active`
 
 const categorySelectOne = `id, name, COALESCE(parent_id, 0), '', transaction_class,
-	COALESCE(budget_per_month, 0), budget_per_month IS NOT NULL, budgetable, is_active`
+	COALESCE(budget_per_month, 0), budget_per_month IS NOT NULL, is_budgetable, is_active`
 
 var categoryClasses = []string{"expense", "income", "transfer"}
 
@@ -180,7 +180,7 @@ func (a *App) handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
 		budget = f.Budget
 	}
 	_, err := a.Pool.Exec(r.Context(),
-		`INSERT INTO category (household_id, name, parent_id, transaction_class, budget_per_month, budgetable)
+		`INSERT INTO category (household_id, name, parent_id, transaction_class, budget_per_month, is_budgetable)
 		 VALUES ($1,$2,$3,$4,$5,$6)`,
 		hh, f.Name, parentID, f.Class, budget, f.Budgetable)
 	if err != nil {
@@ -249,7 +249,7 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = a.Pool.Exec(ctx,
 		`UPDATE category SET name=$1, parent_id=$2, transaction_class=$3,
-		 budget_per_month=$4, budgetable=$5 WHERE id=$6 AND household_id=$7`,
+		 budget_per_month=$4, is_budgetable=$5 WHERE id=$6 AND household_id=$7`,
 		f.Name, parentID, f.Class, budget, f.Budgetable, id, hh)
 	if err != nil {
 		if isUniqueViolation(err) {

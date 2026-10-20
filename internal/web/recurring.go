@@ -12,6 +12,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -51,13 +52,39 @@ type recurringSpec struct {
 	partKeys   []string // "user:N" / "cp:N"
 }
 
+// --- split_spec (JSONB array of participant keys) ---------------------------
+
+// splitSpecToJSONB serializes a participant-key list into the JSONB array
+// stored on recurring_template.split_spec, e.g. ["user:3","cp:2"].
+func splitSpecToJSONB(keys []string) ([]byte, error) {
+	if len(keys) == 0 {
+		return []byte("[]"), nil
+	}
+	b, err := json.Marshal(keys)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// splitSpecKeys decodes a stored split_spec JSONB array back into a key list.
+// (Legacy ';' -text values no longer exist after migration 000007.)
+func splitSpecKeys(specJSON []byte) []string {
+	var keys []string
+	if len(specJSON) == 0 {
+		return keys
+	}
+	_ = json.Unmarshal(specJSON, &keys)
+	return keys
+}
+
 func (a *App) handleRecurring(w http.ResponseWriter, r *http.Request) {
 	hh := sessionFromContext(r.Context()).Household
 	a.generateDueRecurring(r.Context(), hh, time.Now())
 
 	rows, err := a.Pool.Query(r.Context(), `
 		SELECT t.id, t.name, COALESCE(m.name, ''), COALESCE(c.name, ''), a.name,
-		       t.amount, t.day_of_month, t.active, t.last_generated_date, t.split_spec
+		       t.amount, t.day_of_month, t.is_active, t.last_generated_date, t.split_spec
 		FROM recurring_template t
 		LEFT JOIN merchant m ON m.id = t.merchant_id
 		LEFT JOIN category c ON c.id = t.category_id
@@ -72,9 +99,9 @@ func (a *App) handleRecurring(w http.ResponseWriter, r *http.Request) {
 	// Participant display names, resolved once for all rows.
 	nameByRef := map[string]string{}
 	prs, err := a.Pool.Query(r.Context(), `
-		SELECT 'user:'||id, display_name FROM "user" WHERE household_id = $1
+		SELECT 'user:'||id, display_name FROM app_user WHERE household_id = $1
 		UNION ALL
-		SELECT 'cp:'||id, name FROM counterparty WHERE household_id = $1`, hh)
+		SELECT 'cp:'||id, name FROM party WHERE household_id = $1`, hh)
 	if err != nil {
 		http.Error(w, "participant names: "+err.Error(), 500)
 		return
@@ -92,20 +119,18 @@ func (a *App) handleRecurring(w http.ResponseWriter, r *http.Request) {
 	var list []RecurringLine
 	for rows.Next() {
 		var l RecurringLine
-		var spec string
+		var specJSON []byte
 		if err := rows.Scan(&l.ID, &l.Name, &l.Merchant, &l.Category, &l.Account,
-			&l.Amount, &l.DayOfMonth, &l.Active, &l.LastGenerated, &spec); err != nil {
+			&l.Amount, &l.DayOfMonth, &l.Active, &l.LastGenerated, &specJSON); err != nil {
 			http.Error(w, "scan recurring: "+err.Error(), 500)
 			return
 		}
 		var names []string
-		for _, k := range strings.Split(spec, ";") {
-			if k = strings.TrimSpace(k); k != "" {
-				if nm, ok2 := nameByRef[k]; ok2 {
-					names = append(names, nm)
-				} else {
-					names = append(names, k)
-				}
+		for _, k := range splitSpecKeys(specJSON) {
+			if nm, ok2 := nameByRef[k]; ok2 {
+				names = append(names, nm)
+			} else {
+				names = append(names, k)
 			}
 		}
 		l.Participants = strings.Join(names, ", ")
@@ -136,7 +161,7 @@ type recurringForm struct {
 	Cats        []opt
 	Accounts    []opt
 	Users       []opt
-	CPs         []opt
+	Parties     []opt
 	DayOptions  []int
 }
 
@@ -147,7 +172,7 @@ func (a *App) recurringFormOptions(ctx context.Context, hh int64) (*recurringFor
 	}
 	// Users (split participants).
 	rows, err := a.Pool.Query(ctx,
-		`SELECT id, display_name FROM "user" WHERE household_id = $1 ORDER BY id`, hh)
+		`SELECT id, display_name FROM app_user WHERE household_id = $1 ORDER BY id`, hh)
 	if err != nil {
 		return nil, err
 	}
@@ -160,9 +185,9 @@ func (a *App) recurringFormOptions(ctx context.Context, hh int64) (*recurringFor
 		f.Users = append(f.Users, u)
 	}
 	rows.Close()
-	// Counterparties (rare participants, but allowed).
+	// Parties (split participants: member rows + outsiders).
 	rows, err = a.Pool.Query(ctx,
-		`SELECT id, name FROM counterparty WHERE household_id = $1 ORDER BY name`, hh)
+		`SELECT id, name FROM party WHERE household_id = $1 ORDER BY name`, hh)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +197,7 @@ func (a *App) recurringFormOptions(ctx context.Context, hh int64) (*recurringFor
 			rows.Close()
 			return nil, err
 		}
-		f.CPs = append(f.CPs, c)
+		f.Parties = append(f.Parties, c)
 	}
 	rows.Close()
 	// Merchants (active or ever referenced).
@@ -271,18 +296,19 @@ func (a *App) handleRecurringEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var (
-		name, amountStr, spec string
-		accountID             int64
-		merch, cat            int64
-		day                   int
-		active                bool
+		name, amountStr string
+		specJSON        []byte
+		accountID       int64
+		merch, cat      int64
+		day             int
+		active          bool
 	)
 	err = a.Pool.QueryRow(ctx, `
 		SELECT t.name, t.amount, t.split_spec, t.account_id,
 		       COALESCE(t.merchant_id, 0), COALESCE(t.category_id, 0),
-		       t.day_of_month, t.active
+		       t.day_of_month, t.is_active
 		FROM recurring_template t WHERE t.id = $1 AND t.household_id = $2`, id, hh).
-		Scan(&name, &amountStr, &spec, &accountID, &merch, &cat, &day, &active)
+		Scan(&name, &amountStr, &specJSON, &accountID, &merch, &cat, &day, &active)
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.Error(w, "not found", 404)
 		return
@@ -299,9 +325,7 @@ func (a *App) handleRecurringEdit(w http.ResponseWriter, r *http.Request) {
 	f.AccountID = accountID
 	f.DayOfMonth = strconv.Itoa(day)
 	f.Active = active
-	if spec != "" {
-		f.SelectedKeys = strings.Split(spec, ";")
-	}
+	f.SelectedKeys = splitSpecKeys(specJSON)
 	a.renderRecurringForm(w, r, f)
 }
 
@@ -369,9 +393,9 @@ func (a *App) saveRecurring(w http.ResponseWriter, r *http.Request, hh, id int64
 			a.renderRecurringForm(w, r, f)
 			return
 		}
-		table := "counterparty"
+		table := "party"
 		if typ == "household_user" {
-			table = `"user"`
+			table = `app_user`
 		}
 		var n int
 		if err := a.Pool.QueryRow(ctx,
@@ -398,13 +422,19 @@ func (a *App) saveRecurring(w http.ResponseWriter, r *http.Request, hh, id int64
 		cat = f.CategoryID
 	}
 	if id == 0 {
+		specJSON, jerr := splitSpecToJSONB(f.SelectedKeys)
+		if jerr != nil {
+			f.Err = "Could not encode participants."
+			a.renderRecurringForm(w, r, f)
+			return
+		}
 		_, err = a.Pool.Exec(ctx, `
 			INSERT INTO recurring_template
 				(household_id, name, merchant_id, category_id, account_id,
-				 amount, day_of_month, split_spec, active)
+				 amount, day_of_month, split_spec, is_active)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 			hh, f.Name, merch, cat, f.AccountID, amount, day,
-			strings.Join(f.SelectedKeys, ";"), f.Active)
+			specJSON, f.Active)
 		if err != nil {
 			if isUniqueViolation(err) {
 				f.Err = "A recurring template with this name already exists."
@@ -417,13 +447,19 @@ func (a *App) saveRecurring(w http.ResponseWriter, r *http.Request, hh, id int64
 		a.redirectRef(w, r, "/recurring", "Recurring template created.")
 		return
 	}
+	specJSON2, jerr := splitSpecToJSONB(f.SelectedKeys)
+	if jerr != nil {
+		f.Err = "Could not encode participants."
+		a.renderRecurringForm(w, r, f)
+		return
+	}
 	res, err := a.Pool.Exec(ctx, `
 		UPDATE recurring_template SET
 			name=$1, merchant_id=$2, category_id=$3, account_id=$4,
-			amount=$5, day_of_month=$6, split_spec=$7, active=$8
+			amount=$5, day_of_month=$6, split_spec=$7, is_active=$8
 		WHERE id=$9 AND household_id=$10`,
 		f.Name, merch, cat, f.AccountID, amount, day,
-		strings.Join(f.SelectedKeys, ";"), f.Active, id, hh)
+		specJSON2, f.Active, id, hh)
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "A recurring template with this name already exists."
@@ -449,7 +485,7 @@ func (a *App) handleRecurringDeactivate(w http.ResponseWriter, r *http.Request) 
 	}
 	hh := sessionFromContext(r.Context()).Household
 	res, err := a.Pool.Exec(r.Context(),
-		`UPDATE recurring_template SET active = false WHERE id = $1 AND household_id = $2`,
+		`UPDATE recurring_template SET is_active = false WHERE id = $1 AND household_id = $2`,
 		id, hh)
 	if err != nil {
 		http.Error(w, "deactivate recurring: "+err.Error(), 500)
@@ -470,7 +506,7 @@ type dueTemplate struct {
 	name                    string
 	amount                  money.Money
 	day                     int
-	spec                    string
+	specJSON                []byte
 }
 
 // generateDueRecurring creates this month's pending entry for every active
@@ -485,7 +521,7 @@ func (a *App) generateDueRecurring(ctx context.Context, hh int64, now time.Time)
 		SELECT t.id, t.name, t.amount, t.day_of_month, t.split_spec,
 		       t.account_id, COALESCE(t.merchant_id, 0), COALESCE(t.category_id, 0)
 		FROM recurring_template t
-		WHERE t.household_id = $1 AND t.active
+		WHERE t.household_id = $1 AND t.is_active
 		  AND (t.last_generated_date IS NULL OR t.last_generated_date < $2)
 		ORDER BY t.id`, hh, monthStart)
 	if err != nil {
@@ -494,7 +530,7 @@ func (a *App) generateDueRecurring(ctx context.Context, hh int64, now time.Time)
 	var dues []dueTemplate
 	for rows.Next() {
 		var d dueTemplate
-		if err := rows.Scan(&d.id, &d.name, &d.amount, &d.day, &d.spec,
+		if err := rows.Scan(&d.id, &d.name, &d.amount, &d.day, &d.specJSON,
 			&d.account, &d.merch, &d.cat); err != nil {
 			rows.Close()
 			return
@@ -509,6 +545,10 @@ func (a *App) generateDueRecurring(ctx context.Context, hh int64, now time.Time)
 	for _, d := range dues {
 		date := monthStart.AddDate(0, 0, d.day-1).Format("2006-01-02")
 		if err := a.generateRecurringEntry(ctx, hh, d, date); err != nil {
+			if errors.Is(err, errSiblingGenerated) {
+				log.Printf("recurring: %q for %s already generated by another worker", d.name, date)
+				continue
+			}
 			// Leave last_generated_date unset so the next page load
 			// retries (a vanished participant, for instance).
 			logRecurringSkip(d.name, err)
@@ -523,12 +563,23 @@ func logRecurringSkip(name string, err error) {
 	log.Printf("recurring: skipped %q: %v", name, err)
 }
 
+// errSiblingGenerated: a concurrent worker already generated this month's
+// occurrence (lost the row-lock race). Not a failure: log and move on.
+var errSiblingGenerated = errors.New("sibling worker already generated this occurrence")
+
 func (a *App) generateRecurringEntry(ctx context.Context, hh int64, d dueTemplate, date string) error {
-	// Validate split participants; skip (and retry later) if any vanished.
+	// Serialize concurrent generation for this template. The row lock is
+	// the fast path: two workers loading the page at once queue up here,
+	// the second one then re-checks and sees the occurrence already exists.
+	// The unique index uq_txn_recurring_occurrence is the safety net the
+	// lock is not (crash between lock release and commit, etc.): the loser
+	// hits 23505 and is skipped.
+	//
+	// Validate transaction_split participants; skip (and retry later) if any vanished.
+	// (parts is de-duplicated — the stored array already is, but be safe.)
 	var parts []string
 	seen := map[string]bool{}
-	for _, k := range strings.Split(d.spec, ";") {
-		k = strings.TrimSpace(k)
+	for _, k := range splitSpecKeys(d.specJSON) {
 		if k == "" || seen[k] {
 			continue
 		}
@@ -536,9 +587,9 @@ func (a *App) generateRecurringEntry(ctx context.Context, hh int64, d dueTemplat
 		if perr != nil {
 			return fmt.Errorf("recurring %s: bad participant %q", d.name, k)
 		}
-		table := "counterparty"
+		table := "party"
 		if typ == "household_user" {
-			table = `"user"`
+			table = `app_user`
 		}
 		var n int
 		if err := a.Pool.QueryRow(ctx,
@@ -554,11 +605,9 @@ func (a *App) generateRecurringEntry(ctx context.Context, hh int64, d dueTemplat
 	}
 	shares := split.EqualSplit(d.amount, len(parts))
 
-	// Destination mirrors capture: the merchant when set, otherwise the
-	// account itself (money leaving to the card's liability side).
-	destType, destRef := "merchant", d.merch
-	if destRef <= 0 {
-		destType, destRef = "account", d.account
+	partyIDs, err := a.splitEditorKeys(ctx, hh, parts)
+	if err != nil {
+		return fmt.Errorf("recurring %s: %v", d.name, err)
 	}
 
 	tx, err := a.Pool.Begin(ctx)
@@ -566,6 +615,16 @@ func (a *App) generateRecurringEntry(ctx context.Context, hh int64, d dueTemplat
 		return err
 	}
 	defer tx.Rollback(ctx)
+	// Row lock: serializes concurrent generation for this template. The
+	// loser's INSERT below then hits the void-aware unique index (23505).
+	if err := tx.QueryRow(ctx,
+		`SELECT id FROM recurring_template WHERE id = $1 FOR UPDATE`, d.id).Scan(&d.id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Template vanished mid-generation; next load re-queries dues.
+			return fmt.Errorf("recurring %s: template no longer exists", d.name)
+		}
+		return err
+	}
 	var merch, cat any
 	if d.merch > 0 {
 		merch = d.merch
@@ -576,24 +635,30 @@ func (a *App) generateRecurringEntry(ctx context.Context, hh int64, d dueTemplat
 	var txnID int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO "transaction" (
-		household_id, recorded_by, transaction_date, class,
-			category_id, merchant_id, description, description_extra,
-			total_amount, origin_type, origin_ref, destination_type,
-			destination_ref, record_status, source, notes
+			household_id, recorded_by_user_id, transaction_date, class,
+				category_id, merchant_id, description, description_extra,
+				total_amount, origin_account_id,
+				record_status, source, notes,
+				recurring_template_id
 		) VALUES ($1, NULL, $2, 'expense', $3, $4, $5, '', $6,
-			'account', $7, $8, $9, 'pending', 'template', $10)
+			$7, 'pending', 'template', $8, $9)
 		RETURNING id`,
-		hh, date, cat, merch, d.name, d.amount, d.account, destType, destRef,
-		"Auto-generated from recurring template. Review and approve.").
+		hh, date, cat, merch, d.name, d.amount, d.account,
+		"Auto-generated from recurring template. Review and approve.", d.id).
 		Scan(&txnID)
 	if err != nil {
+		if isUniqueViolation(err) {
+			// Lost the race: a sibling worker committed this month's
+			// occurrence first. The void-aware unique index is the
+			// guarantee; the row lock is just the fast path.
+			return errSiblingGenerated
+		}
 		return err
 	}
-	for i, k := range parts {
-		typ, ref, _ := parseParticipantKey(k)
+	for i := range parts {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO split (transaction_id, participant_type, participant_ref, amount)
-			VALUES ($1, $2, $3, $4)`, txnID, typ, ref, shares[i]); err != nil {
+			INSERT INTO transaction_split (household_id, transaction_id, party_id, amount)
+			VALUES ($1, $2, $3, $4)`, hh, txnID, partyIDs[i], shares[i]); err != nil {
 			return err
 		}
 	}
@@ -629,7 +694,7 @@ func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
 		FROM "transaction" t
 		LEFT JOIN merchant m ON m.id = t.merchant_id
 		LEFT JOIN category c ON c.id = t.category_id
-		LEFT JOIN "user" u ON u.id = t.recorded_by
+		LEFT JOIN app_user u ON u.id = t.recorded_by_user_id
 		WHERE t.household_id = $1 AND t.record_status = 'pending'
 		ORDER BY t.transaction_date DESC, t.id DESC`, hh)
 	if err != nil {
@@ -690,8 +755,8 @@ func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 	// Which of these already have payment allocations?
 	rows, err := a.Pool.Query(ctx, `
 		SELECT s.transaction_id
-		FROM payment_allocation pa
-		JOIN split s ON s.id = pa.split_id
+		FROM settlement_allocation pa
+		JOIN transaction_split s ON s.id = pa.split_id
 		WHERE s.transaction_id = ANY($1)`, ids)
 	if err != nil {
 		http.Error(w, "check allocations: "+err.Error(), 500)

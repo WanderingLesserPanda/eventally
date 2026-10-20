@@ -155,20 +155,17 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// Card 3: outstanding per person across all credit cards.
 	var personOuts []dashPersonOut
 	rows, err = a.Pool.Query(ctx, `
-		SELECT COALESCE(CASE s.participant_type
-		                  WHEN 'household_user' THEN u.display_name
-		                  ELSE cp.name END, 'Unknown'),
+		SELECT COALESCE(p.name, 'Unknown'),
 		       SUM(s.amount - COALESCE(al.a, 0))
-		FROM split s
+		FROM transaction_split s
 		JOIN "transaction" t ON t.id = s.transaction_id
 		JOIN account a ON a.account_type = 'credit_card' AND a.is_active
 		  AND a.household_id = $1 AND (
-			(t.origin_type = 'account' AND t.origin_ref = a.id)
-			OR (t.destination_type = 'account' AND t.destination_ref = a.id))
-		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
-		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND s.participant_ref = cp.id
+			(t.origin_account_id = a.id)
+			OR (t.destination_account_id = a.id))
+		LEFT JOIN party p ON p.id = s.party_id
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
-			FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
+			FROM settlement_allocation GROUP BY split_id) al ON al.split_id = s.id
 		WHERE t.household_id = $1 AND t.record_status <> 'void' AND t.class = 'expense'
 		GROUP BY 1
 		HAVING SUM(s.amount - COALESCE(al.a, 0)) > 0

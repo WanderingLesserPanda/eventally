@@ -141,7 +141,7 @@ func (a *App) handleFirstRunPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO "user" (household_id, username, display_name, email, pass_hash)
+		`INSERT INTO app_user (household_id, username, display_name, email, password_hash)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 		hh, f.Username, f.DisplayName, f.Email, hash).Scan(&userID); err != nil {
 		if isUniqueViolation(err) {
@@ -152,6 +152,16 @@ func (a *App) handleFirstRunPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("first-run user insert: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	// Multi-household membership (000006): the founding user is the
+	// household's owner. user.household_id stays set as the legacy
+	// primary-household pointer (login, email uniqueness).
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO household_member (user_id, household_id, role)
+		 VALUES ($1, $2, 'owner')`, userID, hh); err != nil {
+		log.Printf("first-run membership insert: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

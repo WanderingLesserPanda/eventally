@@ -48,12 +48,12 @@
       </label>
       {{end}}
       {{end}}
-      {{if .F.CPs}}
-      {{range .F.CPs}}
+      {{if .F.Parties}}
+      {{range .F.Parties}}
       <label class="checkline">
         <input type="checkbox" name="part[]" value="cp:{{.ID}}"
                {{if contains $.F.SelectedKeys (printf "cp:%d" .ID)}}checked{{end}}>
-        {{.Name}} <span class="muted small">(counterparty)</span>
+        {{.Name}} <span class="muted small">(party)</span>
       </label>
       {{end}}
       {{end}}

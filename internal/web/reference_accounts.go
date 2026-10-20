@@ -138,10 +138,10 @@ func (a *App) accountLiveBalance(ctx context.Context, hh int64, ids []int64) (mo
 		                  WHERE x.household_id = $1 AND x.id IN (`+ph+`)), 0)
 		 + COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 			           WHERE t.household_id = $1 AND t.record_status <> 'void'
-			             AND t.origin_type = 'account' AND t.origin_ref IN (`+ph+`)), 0)
+			             AND t.origin_account_id IN (`+ph+`)), 0)
 		 - COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 			           WHERE t.household_id = $1 AND t.record_status <> 'void'
-			             AND t.destination_type = 'account' AND t.destination_ref IN (`+ph+`)), 0)`,
+			             AND t.destination_account_id IN (`+ph+`)), 0)`,
 		append([]any{hh}, toAny(ids)...)...).Scan(&bal)
 	return bal, err
 }

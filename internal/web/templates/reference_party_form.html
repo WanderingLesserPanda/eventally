@@ -1,8 +1,8 @@
-{{define "page/reference_counterparty_form"}}
+{{define "page/reference_party_form"}}
 <div class="card">
-  <h1>{{if .Editing}}Edit counterparty{{else}}New counterparty{{end}}</h1>
+  <h1>{{if .Editing}}Edit party{{else}}New party{{end}}</h1>
   {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
-  <form method="post" action="{{if .Editing}}/counterparties/{{.F.ID}}{{else}}/counterparties{{end}}">
+  <form method="post" action="{{if .Editing}}/parties/{{.F.ID}}{{else}}/parties{{end}}">
     {{template "csrf" .}}
     <div class="form-grid">
       <label>Name *
@@ -28,7 +28,7 @@
     </label>
     <div class="form-actions">
       <button type="submit" class="btn-primary">{{if .Editing}}Save{{else}}Create{{end}}</button>
-      <a class="btn" href="/counterparties">Cancel</a>
+      <a class="btn" href="/parties">Cancel</a>
     </div>
   </form>
 </div>

@@ -11,24 +11,35 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/WanderingLesserPanda/eventally/internal/money"
 )
+
+// pgErrCode returns the Postgres SQLSTATE of err, or "" if it is not a
+// Postgres error.
+func pgErrCode(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+	return ""
+}
 
 // ---------------------------------------------------------------------------
 // Phase P5: card view + payments with allocations (D5, D6).
 //
 //   - /cards: every credit card account with outstanding (unpaid expense
 //     splits) and the computed recorded balance.
-//   - /cards/{id}: outstanding per person, the unpaid split list (multi-select
+//   - /cards/{id}: outstanding per person, the unpaid transaction_split list (multi-select
 //     for lump-sum payments, D5), and the payment history with allocations.
-//   - /cards/{id}/pay: record a payment. Amount + date + method + paid_by,
+//   - /cards/{id}/pay: record a payment. Amount + date + method + paid_by_user_id,
 //     allocation inputs pre-filled with each selected split's outstanding.
 //     Optionally (D6) the same action writes the ledger transfer
 //     savings → card so the recorded card balance stays in step with the
 //     real one; the transfer is a split-less, approved balance movement and
 //     is linked back via payment.ledger_transaction_id.
 //
-// Outstanding per split = split.amount − SUM(allocations) (D5: negative
+// Outstanding per transaction_split = split.amount − SUM(allocations) (D5: negative
 // means overpaid, carries forward). Only class='expense' splits are
 // payable; income/refund items are card credits (balance movements, not
 // debt). record_status 'pending' still counts — approval happens at the
@@ -57,7 +68,7 @@ type byPerson struct {
 	Due         money.Money
 }
 
-// unpaidLine is one payable split row.
+// unpaidLine is one payable transaction_split row.
 type unpaidLine struct {
 	SplitID     int64
 	Date        time.Time
@@ -70,15 +81,19 @@ type unpaidLine struct {
 }
 
 // payLine is one payment-history row (allocations attached below).
+// Credit is the unapplied portion of the payment: amount − Σ allocations.
+// A settlement may pay more than its allocations (option (a), Gate 4) —
+// the excess is carried as credit until later allocations absorb it.
 type payLine struct {
-	ID        int64
-	Date      time.Time
-	Amount    money.Money
-	Method    string
-	PaidBy    string
-	Notes     string
-	LedgerID  int64
-	Allocs    []allocLine
+	ID       int64
+	Date     time.Time
+	Amount   money.Money
+	Credit   money.Money
+	Method   string
+	PaidBy   string
+	Notes    string
+	LedgerID int64
+	Allocs   []allocLine
 }
 
 type allocLine struct {
@@ -97,13 +112,17 @@ type cardDetailData struct {
 	CreditLimit money.Money
 	Outstanding money.Money
 	Recorded    money.Money
-	People      []byPerson
-	Unpaid      []unpaidLine
-	Payments    []payLine
-	Family      *cardFamily
+	// UnappliedCredit is the sum of (payment − allocations) over the
+	// family's settlements: money taken in that was not yet absorbed by
+	// split allocations (Gate 4, option (a)).
+	UnappliedCredit money.Money
+	People          []byPerson
+	Unpaid          []unpaidLine
+	Payments        []payLine
+	Family          *cardFamily
 }
 
-// payRow is one allocation row of the pay form: the payable split plus the
+// payRow is one allocation row of the pay form: the payable transaction_split plus the
 // amount allocated to it as typed ("" on a fresh GET means "the whole
 // outstanding" — the template pre-fills the input with Due).
 type payRow struct {
@@ -125,6 +144,9 @@ type cardPayForm struct {
 	Notes       string
 	Rows        []payRow
 	AllocSum    money.Money
+	// Unapplied is the part of the typed payment not covered by the
+	// allocations (shown on the record button when > 0, Gate 4 option (a)).
+	Unapplied   money.Money
 	Users       []opt
 	Sources     []opt // asset accounts (D6 source)
 	Methods     []string
@@ -201,14 +223,14 @@ func toAny(v []int64) []any {
 	return out
 }
 
-// cardUnpaidWhere is the card's outstanding split filter (pending +
+// cardUnpaidWhere is the card's outstanding transaction_split filter (pending +
 // approved, never void, never transfer — transfers have no splits). The
 // IN_ACCOUNTS marker is replaced by inPh(fam) via unpaidWhereFor;
 // placeholders 2..1+len(fam) hold the family account ids.
 const cardUnpaidWhere = `t.household_id = $1 AND t.record_status <> 'void'
 	AND t.class = 'expense' AND (
-	  (t.origin_type = 'account' AND t.origin_ref IN (IN_ACCOUNTS))
-	  OR (t.destination_type = 'account' AND t.destination_ref IN (IN_ACCOUNTS)))`
+	  (t.origin_account_id IN (IN_ACCOUNTS))
+	  OR (t.destination_account_id IN (IN_ACCOUNTS)))`
 
 // unpaidWhereFor scopes cardUnpaidWhere to a card family's account ids.
 func unpaidWhereFor(fam []int64) string {
@@ -221,10 +243,10 @@ func (a *App) cardOutstanding(ctx context.Context, hh int64, fam []int64) (money
 	var out money.Money
 	err := a.Pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(s.amount - COALESCE(al.a, 0)), 0)
-		FROM split s
+		FROM transaction_split s
 		JOIN "transaction" t ON t.id = s.transaction_id
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
-			FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
+			FROM settlement_allocation GROUP BY split_id) al ON al.split_id = s.id
 		WHERE `+unpaidWhereFor(fam),
 		append([]any{hh}, toAny(fam)...)...).Scan(&out)
 	return out, err
@@ -248,11 +270,11 @@ func (a *App) cardRecordedBalance(ctx context.Context, hh int64, fam []int64) (m
 		                  WHERE a.household_id = $1 AND a.id IN (`+ph+`)), 0)
 		 + COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.origin_type = 'account' AND t.origin_ref IN (`+ph+`)), 0)
+		        AND t.origin_account_id IN (`+ph+`)), 0)
 		 - COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.destination_type = 'account' AND t.destination_ref IN (`+ph+`)), 0)
-		 - COALESCE((SELECT SUM(p.amount) FROM payment p
+		        AND t.destination_account_id IN (`+ph+`)), 0)
+		 - COALESCE((SELECT SUM(p.amount) FROM settlement p
 		              WHERE p.household_id = $1 AND p.ledger_transaction_id IS NULL
 		        AND p.account_id IN (`+ph+`)), 0)`,
 		append([]any{hh}, toAny(fam)...)...).Scan(&bal)
@@ -265,18 +287,15 @@ func (a *App) cardUnpaidLines(ctx context.Context, hh int64, fam []int64) ([]unp
 	rows, err := a.Pool.Query(ctx, `
 		SELECT s.id, t.transaction_date,
 		       COALESCE(NULLIF(t.description, ''), m.name, '—'),
-		       COALESCE(CASE s.participant_type
-		                  WHEN 'household_user' THEN u.display_name
-		                  ELSE cp.name END, 'Unknown'),
+		       COALESCE(p.name, 'Unknown'),
 		       t.record_status, s.amount,
 		       COALESCE(al.a, 0)
-		FROM split s
+		FROM transaction_split s
 		JOIN "transaction" t ON t.id = s.transaction_id
 		LEFT JOIN merchant m ON m.id = t.merchant_id
-		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
-		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND cp.id = s.participant_ref
+		LEFT JOIN party p ON p.id = s.party_id
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
-			FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
+			FROM settlement_allocation GROUP BY split_id) al ON al.split_id = s.id
 		WHERE `+unpaidWhereFor(fam)+`
 		AND s.amount - COALESCE(al.a, 0) > 0
 		ORDER BY t.transaction_date, s.id`, append([]any{hh}, toAny(fam)...)...)
@@ -304,19 +323,16 @@ func (a *App) cardUnpaidLines(ctx context.Context, hh int64, fam []int64) ([]unp
 // parent's roll-up).
 func (a *App) cardByPerson(ctx context.Context, hh int64, fam []int64) ([]byPerson, error) {
 	rows, err := a.Pool.Query(ctx, `
-		SELECT COALESCE(CASE s.participant_type
-		                  WHEN 'household_user' THEN u.display_name
-		                  ELSE cp.name END, 'Unknown'),
-		       CASE WHEN s.participant_type = 'household_user'
-		            THEN s.participant_ref ELSE 0 END,
+		SELECT COALESCE(p.name, 'Unknown'),
+		       CASE WHEN p.app_user_id IS NOT NULL
+		            THEN p.app_user_id ELSE 0 END,
 		       SUM(s.amount),
 		       SUM(s.amount - COALESCE(al.a, 0))
-		FROM split s
+		FROM transaction_split s
 		JOIN "transaction" t ON t.id = s.transaction_id
-		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
-		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND cp.id = s.participant_ref
+		LEFT JOIN party p ON p.id = s.party_id
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
-			FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
+			FROM settlement_allocation GROUP BY split_id) al ON al.split_id = s.id
 		WHERE `+unpaidWhereFor(fam)+`
 		GROUP BY 1, 2
 		HAVING SUM(s.amount - COALESCE(al.a, 0)) > 0
@@ -342,8 +358,8 @@ func (a *App) cardPayments(ctx context.Context, hh int64, fam []int64) ([]payLin
 	rows, err := a.Pool.Query(ctx, `
 		SELECT p.id, p.payment_date, p.amount, p.method, u.display_name,
 		       p.notes, COALESCE(p.ledger_transaction_id, 0)
-		FROM payment p
-		JOIN "user" u ON u.id = p.paid_by
+		FROM settlement p
+		JOIN app_user u ON u.id = p.paid_by_user_id
 		WHERE p.household_id = $1 AND p.account_id IN (`+ph+`)
 		ORDER BY p.payment_date DESC, p.id DESC`, append([]any{hh}, toAny(fam)...)...)
 	if err != nil {
@@ -378,16 +394,13 @@ func (a *App) cardPayments(ctx context.Context, hh int64, fam []int64) ([]payLin
 	arows, err := a.Pool.Query(ctx, `
 		SELECT pa.payment_id, pa.amount, t.transaction_date,
 		       COALESCE(NULLIF(t.description, ''), m.name, '—'),
-		       COALESCE(CASE s.participant_type
-		                  WHEN 'household_user' THEN u.display_name
-		                  ELSE cp.name END, '')
-		FROM payment_allocation pa
-		JOIN payment p ON p.id = pa.payment_id
-		JOIN split s ON s.id = pa.split_id
+		       COALESCE(pt.name, '')
+		FROM settlement_allocation pa
+		JOIN settlement p ON p.id = pa.payment_id
+		JOIN transaction_split s ON s.id = pa.split_id
 		JOIN "transaction" t ON t.id = s.transaction_id
 		LEFT JOIN merchant m ON m.id = t.merchant_id
-		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
-		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND cp.id = s.participant_ref
+		LEFT JOIN party pt ON pt.id = s.party_id
 		WHERE p.household_id = $1
 		  AND p.id IN (`+strings.Join(ph2, ",")+`)
 		ORDER BY p.payment_date, p.id, s.id`, args...)
@@ -410,6 +423,17 @@ func (a *App) cardPayments(ctx context.Context, hh int64, fam []int64) ([]payLin
 		}
 		if p := byPay[pid]; p != nil {
 			p.Allocs = append(p.Allocs, alloc)
+		}
+	}
+	// Unapplied credit per settlement (Gate 4, option (a)): the part of a
+	// payment that was not allocated to a split.
+	for i := range pays {
+		var allocTotal money.Money
+		for _, al := range pays[i].Allocs {
+			allocTotal = allocTotal.Add(al.Amount)
+		}
+		if c := pays[i].Amount.Sub(allocTotal); c > 0 {
+			pays[i].Credit = c
 		}
 	}
 	return pays, nil
@@ -671,12 +695,19 @@ func (a *App) handleCardDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "card payments: "+err.Error(), 500)
 		return
 	}
+	// Unapplied credit (Gate 4, option (a)): the part of this family's
+	// settlements not yet absorbed by split allocations.
+	var unapplied money.Money
+	for _, p := range pays {
+		unapplied = unapplied.Add(p.Credit)
+	}
 	a.render(w, r, http.StatusOK, "card.html", map[string]any{
 		"Title": name,
 		"Flash": flashFrom(r),
 		"C": cardDetailData{
 			ID: id, Name: name, Institution: inst, CardType: ctype,
 			CreditLimit: limit, Outstanding: out, Recorded: bal,
+			UnappliedCredit: unapplied,
 			People: people, Unpaid: unpaid, Payments: pays,
 			Family: famView,
 		},
@@ -732,12 +763,12 @@ func (a *App) handleCardPayGet(w http.ResponseWriter, r *http.Request) {
 			whargs := append([]any{hh}, toAny(fam)...)
 			whargs = append(whargs, uid)
 			rows2, qerr := a.Pool.Query(ctx, `
-				SELECT s.id FROM split s
+				SELECT s.id FROM transaction_split s
 				JOIN "transaction" t ON t.id = s.transaction_id
 				WHERE `+unpaidWhereFor(fam)+`
-				AND s.participant_type = 'household_user' AND s.participant_ref = $`+strconv.Itoa(len(whargs))+`
+				AND p.app_user_id = $`+strconv.Itoa(len(whargs))+`
 				AND s.amount > COALESCE(
-				(SELECT SUM(pa.amount) FROM payment_allocation pa WHERE pa.split_id = s.id), 0)`,
+				(SELECT SUM(pa.amount) FROM settlement_allocation pa WHERE pa.split_id = s.id), 0)`,
 				whargs...)
 			if qerr == nil {
 				for rows2.Next() {
@@ -834,7 +865,7 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 	if method == "" {
 		method = "transfer"
 	}
-	paidBy, _ := strconv.ParseInt(r.FormValue("paid_by"), 10, 64)
+	paidBy, _ := strconv.ParseInt(r.FormValue("paid_by_user_id"), 10, 64)
 	ledger := r.FormValue("write_ledger") == "on"
 	sourceID, _ := strconv.ParseInt(r.FormValue("source_account"), 10, 64)
 	notes := strings.TrimSpace(r.FormValue("notes"))
@@ -928,6 +959,9 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		f.Rows = append(f.Rows, payRow{unpaidLine: l, Alloc: typedByID[sid]})
 	}
 	f.AllocSum = allocSum
+	if u := amount.Sub(allocSum); u > 0 {
+		f.Unapplied = u
+	}
 
 	if lineErr != "" {
 		f.Err = lineErr
@@ -943,13 +977,13 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		f.Err = "Choose who made the payment."
 	} else if len(allocs) == 0 {
 		f.Err = "Allocate the payment to at least one item."
-	} else if allocSum.Cmp(amount) != 0 {
-		f.Err = fmt.Sprintf("Allocations sum to %s, payment is %s — they must match exactly.",
+	} else if allocSum.Cmp(amount) > 0 {
+		f.Err = fmt.Sprintf("Allocations sum to %s but the payment is only %s — you cannot allocate more than the payment.",
 			allocSum.String(), amount.String())
 	} else {
 		var n int
 		if err := a.Pool.QueryRow(ctx,
-			`SELECT count(*) FROM "user" WHERE id = $1 AND household_id = $2`,
+			`SELECT count(*) FROM app_user WHERE id = $1 AND household_id = $2`,
 			paidBy, hh).Scan(&n); err != nil || n == 0 {
 			f.Err = "Payer not found."
 		}
@@ -999,12 +1033,12 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		desc := fmt.Sprintf("Card payment: %s (%s)", name, date)
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO "transaction" (
-				household_id, recorded_by, transaction_date, class,
+				household_id, recorded_by_user_id, transaction_date, class,
 				description, total_amount,
-				origin_type, origin_ref, destination_type, destination_ref,
+				origin_account_id, destination_account_id,
 				record_status, source, notes
 			) VALUES ($1, $2, $3, 'transfer', $4, $5,
-				'account', $6, 'account', $7,
+				$6, $7,
 				'approved', 'manual', $8)
 			RETURNING id`,
 			hh, paidBy, date, desc, amount,
@@ -1019,7 +1053,7 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 
 	paymentID := 0
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO payment (household_id, account_id, paid_by, amount,
+		INSERT INTO settlement (household_id, account_id, paid_by_user_id, amount,
 		                      payment_date, method, notes, ledger_transaction_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
@@ -1029,13 +1063,19 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, as := range allocs {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO payment_allocation (payment_id, split_id, amount)
-			VALUES ($1, $2, $3)`, paymentID, as.SplitID, as.Amount); err != nil {
+			INSERT INTO settlement_allocation (household_id, payment_id, split_id, amount)
+			VALUES ($1, $2, $3, $4)`, hh, paymentID, as.SplitID, as.Amount); err != nil {
 			http.Error(w, "allocate payment: "+err.Error(), 500)
 			return
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
+		if code := pgErrCode(err); code == "23514" {
+			http.Error(w, "Another settlement was recorded at the same time: the "+
+				"allocations no longer fit within the item's outstanding amount. "+
+				"Please check the card's payment history and try again.", http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "could not record payment: "+err.Error(), 500)
 		return
 	}
@@ -1047,7 +1087,7 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 
 // --- payment delete ------------------------------------------------------------
 
-func (a *App) handlePaymentDelete(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleSettlementDelete(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
 		http.NotFound(w, r)
@@ -1058,7 +1098,7 @@ func (a *App) handlePaymentDelete(w http.ResponseWriter, r *http.Request) {
 
 	var cardID int64
 	err := a.Pool.QueryRow(ctx,
-		`SELECT COALESCE(account_id, 0) FROM payment
+		`SELECT COALESCE(account_id, 0) FROM settlement
 		 WHERE id = $1 AND household_id = $2`, id, hh).Scan(&cardID)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
@@ -1068,7 +1108,7 @@ func (a *App) handlePaymentDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load payment: "+err.Error(), 500)
 		return
 	}
-	if _, err := a.Pool.Exec(ctx, `DELETE FROM payment WHERE id = $1 AND household_id = $2`,
+	if _, err := a.Pool.Exec(ctx, `DELETE FROM settlement WHERE id = $1 AND household_id = $2`,
 		id, hh); err != nil {
 		http.Error(w, "delete payment: "+err.Error(), 500)
 		return
@@ -1085,7 +1125,7 @@ func (a *App) handlePaymentDelete(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) userOptions(ctx context.Context, hh int64) ([]opt, error) {
 	rows, err := a.Pool.Query(ctx,
-		`SELECT id, display_name FROM "user" WHERE household_id = $1 ORDER BY id`, hh)
+		`SELECT id, display_name FROM app_user WHERE household_id = $1 ORDER BY id`, hh)
 	if err != nil {
 		return nil, err
 	}

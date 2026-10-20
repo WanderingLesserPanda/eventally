@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"database/sql"
 	"strconv"
 	"strings"
 	"time"
@@ -23,11 +24,11 @@ import (
 //
 //   - list with filters (date range, class, status, category, account, text)
 //   - full form: class, date, merchant, category, total + FX fields,
-//     origin/destination (account | merchant | counterparty), and an N-way
-//     split editor (equal / percent / exact amount; server-side
+//     origin/destination (account | merchant | party), and an N-way
+//     transaction_split editor (equal / percent / exact amount; server-side
 //     largest-remainder rounding via internal/split so shares always sum to
 //     the total — D4)
-//   - detail: facts, split table, status workflow (D9), receipt attach (D14)
+//   - detail: facts, transaction_split table, status workflow (D9), receipt attach (D14)
 //
 // Conventions carried over from P2: household-scoped selects (active rows
 // plus rows still referenced by history), flash messages via ?msg=, and
@@ -55,19 +56,20 @@ type merchantOpt struct {
 	Cat  int64 // default_category_id, 0 when none
 }
 
-// refSel is one origin/destination dropdown: accounts, merchants and
-// counterparties grouped in a single select; values are encoded "type:id".
+// refSel is one origin/destination dropdown pair: an account select and a
+// party select. The endpoint is one account OR one party (never both); the
+// template encodes the choice as "account:N" / "party:N" into a hidden
+// field so parse stays uniform.
 type refSel struct {
-	Selected  string
-	Accounts  []opt
-	Merchants []opt
-	CPs       []opt
+	Selected string // "account:3" / "party:7" / ""
+	Accounts []opt
+	Parties  []opt
 }
 
 // txnOptions is the shared option set behind the transaction form.
 type txnOptions struct {
 	Users     []opt
-	CPs       []opt
+	Parties   []opt
 	Merchants []merchantOpt
 	Cats      []opt
 	Accounts  []opt
@@ -79,7 +81,7 @@ func (a *App) txnFormOptions(ctx context.Context, hh int64) (*txnOptions, error)
 
 	// Users (split participants).
 	rows, err := a.Pool.Query(ctx,
-		`SELECT id, display_name FROM "user" WHERE household_id = $1 ORDER BY id`, hh)
+		`SELECT id, display_name FROM app_user WHERE household_id = $1 ORDER BY id`, hh)
 	if err != nil {
 		return nil, err
 	}
@@ -93,14 +95,17 @@ func (a *App) txnFormOptions(ctx context.Context, hh int64) (*txnOptions, error)
 	}
 	rows.Close()
 
-	// Counterparties (optional split participants, D4).
+	// Parties (split participants: member rows + outsiders; D4).
 	rows, err = a.Pool.Query(ctx, `
-		SELECT id, name FROM counterparty
+		SELECT id, name FROM party
 		WHERE household_id = $1 AND (is_active
-			OR id IN (SELECT s.participant_ref FROM split s
+			OR id IN (SELECT party_id FROM transaction_split s
 			         JOIN "transaction" t ON t.id = s.transaction_id
-			         WHERE t.household_id = $1
-		           AND s.participant_type = 'counterparty'))
+			         WHERE t.household_id = $1)
+			OR id IN (SELECT origin_party_id FROM "transaction"
+			         WHERE household_id = $1)
+			OR id IN (SELECT destination_party_id FROM "transaction"
+			         WHERE household_id = $1))
 		ORDER BY name`, hh)
 	if err != nil {
 		return nil, err
@@ -111,7 +116,7 @@ func (a *App) txnFormOptions(ctx context.Context, hh int64) (*txnOptions, error)
 			rows.Close()
 			return nil, err
 		}
-		o.CPs = append(o.CPs, c)
+		o.Parties = append(o.Parties, c)
 	}
 	rows.Close()
 
@@ -158,14 +163,14 @@ func (a *App) txnFormOptions(ctx context.Context, hh int64) (*txnOptions, error)
 	rows.Close()
 	_ = refOrActive // (documented; subqueries above are tailored per table)
 
-	// Accounts (origin/destination choices).
+	// Accounts (origin/destination choices — plus parties are shared).
 	rows, err = a.Pool.Query(ctx, `
 		SELECT id, name FROM account
 		WHERE household_id = $1 AND (is_active
-			OR id IN (SELECT origin_ref FROM "transaction"
-			         WHERE household_id = $1 AND origin_type = 'account')
-			OR id IN (SELECT destination_ref FROM "transaction"
-			         WHERE household_id = $1 AND destination_type = 'account'))
+			OR id IN (SELECT origin_account_id FROM "transaction"
+			         WHERE household_id = $1)
+			OR id IN (SELECT destination_account_id FROM "transaction"
+			         WHERE household_id = $1))
 		ORDER BY name`, hh)
 	if err != nil {
 		return nil, err
@@ -183,18 +188,13 @@ func (a *App) txnFormOptions(ctx context.Context, hh int64) (*txnOptions, error)
 }
 
 func (o *txnOptions) fillRefSels(f *TxnForm) {
-	merch := make([]opt, len(o.Merchants))
-	for i, m := range o.Merchants {
-		merch[i] = opt{ID: m.ID, Name: m.Name}
-	}
 	f.OriginSel.Accounts, f.DestSel.Accounts = o.Accounts, o.Accounts
-	f.OriginSel.Merchants, f.DestSel.Merchants = merch, merch
-	f.OriginSel.CPs, f.DestSel.CPs = o.CPs, o.CPs
+	f.OriginSel.Parties, f.DestSel.Parties = o.Parties, o.Parties
 }
 
 // --- form -------------------------------------------------------------------
 
-// splitRow is one participant row of the split editor as posted back.
+// splitRow is one participant row of the transaction_split editor as posted back.
 type splitRow struct {
 	Key   string // "user:1" / "cp:4" / "" (not included)
 	Value string // percent or amount, as typed (ignored in equal mode)
@@ -204,7 +204,7 @@ type TxnForm struct {
 	Editing bool
 	ID      int64
 	Err     string
-	Locked  bool // a payment already references the splits -> cannot edit
+	Locked  bool // a settlement already references the splits -> cannot edit
 
 	Class           string
 	Date            string
@@ -221,7 +221,7 @@ type TxnForm struct {
 
 	Classes   []string
 	Users     []opt
-	CPs       []opt
+	Parties   []opt // split participants: member rows + outsiders
 	Merchants []merchantOpt
 	Cats      []opt
 	OriginSel refSel
@@ -255,7 +255,7 @@ func (a *App) newTxnForm(ctx context.Context, hh int64) (*TxnForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	f.Users, f.CPs = o.Users, o.CPs
+	f.Users, f.Parties = o.Users, o.Parties
 	f.Merchants, f.Cats = o.Merchants, o.Cats
 	o.fillRefSels(f)
 	// One row per household user (the usual participants) plus one spare.
@@ -279,24 +279,28 @@ func (a *App) loadTxnForm(ctx context.Context, hh, id int64) (*TxnForm, error) {
 	var (
 		t            txnDetail
 		catsel, mers int64
-		otype, dtype string
-		oref, dref   int64
 		charged      string
 		orig, rate   float64
+	)
+	var (
+		origAcc   sql.NullInt64
+		destAcc   sql.NullInt64
+		origParty sql.NullInt64
+		destParty sql.NullInt64
 	)
 	err = a.Pool.QueryRow(ctx, `
 		SELECT t.id, t.transaction_date, t.class, t.description, t.notes,
 		       t.total_amount, t.record_status, t.source,
 		       COALESCE(t.category_id, 0), COALESCE(t.merchant_id, 0),
-		       t.origin_type, COALESCE(t.origin_ref, 0),
-		       t.destination_type, COALESCE(t.destination_ref, 0),
+		       t.origin_account_id, t.destination_account_id,
+		       t.origin_party_id, t.destination_party_id,
 		       COALESCE(t.charged_currency, ''), COALESCE(t.amount_original, 0),
 		       COALESCE(t.exchange_rate, 0)
 		FROM "transaction" t
 		WHERE t.id = $1 AND t.household_id = $2`, id, hh).
 		Scan(&t.ID, &t.Date, &t.Class, &t.Description, &t.Notes, &t.Total,
-			&t.Status, &t.Source, &catsel, &mers, &otype, &oref, &dtype, &dref,
-			&charged, &orig, &rate)
+			&t.Status, &t.Source, &catsel, &mers, &origAcc, &destAcc,
+			&origParty, &destParty, &charged, &orig, &rate)
 	if err != nil {
 		return nil, err
 	}
@@ -312,33 +316,46 @@ func (a *App) loadTxnForm(ctx context.Context, hh, id int64) (*TxnForm, error) {
 	if orig != 0 {
 		f.AmountOriginal = trimNum(orig)
 	}
-	f.OriginSel.Selected = otype + ":" + strconv.FormatInt(oref, 10)
-	f.DestSel.Selected = dtype + ":" + strconv.FormatInt(dref, 10)
+	if origAcc.Valid {
+		f.OriginSel.Selected = "account:" + strconv.FormatInt(origAcc.Int64, 10)
+	} else if origParty.Valid {
+		f.OriginSel.Selected = "party:" + strconv.FormatInt(origParty.Int64, 10)
+	}
+	if destAcc.Valid {
+		f.DestSel.Selected = "account:" + strconv.FormatInt(destAcc.Int64, 10)
+	} else if destParty.Valid {
+		f.DestSel.Selected = "party:" + strconv.FormatInt(destParty.Int64, 10)
+	}
 
 	// Existing splits pre-fill the editor in exact-amount mode: the safest
 	// starting point for an edit (percent would silently re-round).
 	f.Mode = "amount"
 	f.Rows = nil
-	rows, err := a.Pool.Query(ctx,
-		`SELECT participant_type, participant_ref, amount
-		 FROM split WHERE transaction_id = $1 ORDER BY id`, id)
+	rows, err := a.Pool.Query(ctx, `
+		SELECT s.party_id, s.amount, COALESCE(p.app_user_id, 0)
+		FROM transaction_split s
+		LEFT JOIN party p ON p.id = s.party_id
+		WHERE s.transaction_id = $1 ORDER BY s.id`, id)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var ptype string
-		var pref int64
+		var pid, uid int64
 		var amt money.Money
-		if err := rows.Scan(&ptype, &pref, &amt); err != nil {
+		if err := rows.Scan(&pid, &amt, &uid); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		prefix := "user"
-		if ptype == "counterparty" {
-			prefix = "cp"
+		// Members carry their USER id in the key ("user:N" resolves to the
+		// member's party row at save time); outsiders carry the party id.
+		var key string
+		if uid > 0 {
+			key = "user:" + strconv.FormatInt(uid, 10)
+		} else {
+			key = "cp:" + strconv.FormatInt(pid, 10)
 		}
 		f.Rows = append(f.Rows, splitRow{
-			Key:   prefix + ":" + strconv.FormatInt(pref, 10),
+			Key:   key,
 			Value: amt.String(),
 		})
 	}
@@ -355,8 +372,8 @@ func (a *App) loadTxnForm(ctx context.Context, hh, id int64) (*TxnForm, error) {
 
 	var n int
 	_ = a.Pool.QueryRow(ctx, `
-		SELECT count(*) FROM payment_allocation pa
-		JOIN split s ON s.id = pa.split_id
+		SELECT count(*) FROM settlement_allocation pa
+		JOIN transaction_split s ON s.id = pa.split_id
 		WHERE s.transaction_id = $1`, id).Scan(&n)
 	f.Locked = n > 0
 	return f, nil
@@ -384,7 +401,7 @@ type txnspec struct {
 	shares      []money.Money
 }
 
-// parseTxnForm reads and validates the form, including the split editor.
+// parseTxnForm reads and validates the form, including the transaction_split editor.
 // On failure it returns the re-renderable form plus a user message.
 func parseTxnForm(r *http.Request) (*txnspec, *TxnForm, string) {
 	f := &TxnForm{
@@ -452,11 +469,14 @@ func parseTxnForm(r *http.Request) (*txnspec, *TxnForm, string) {
 
 	ot, oid, err := parseRef(f.OriginSel.Selected)
 	if err != nil {
-		return nil, f, "Choose an origin (where does this come from?)."
+		return nil, f, "Choose an origin (where does this come from?). Account or party."
 	}
 	dt, did, err := parseRef(f.DestSel.Selected)
 	if err != nil {
-		return nil, f, "Choose a destination (where does it go?)."
+		return nil, f, "Choose a destination (where does it go?). Account or party."
+	}
+	if ot == dt && oid == did {
+		return nil, f, "Origin and destination cannot be the same entry."
 	}
 	if s.class == "transfer" && (ot != "account" || dt != "account") {
 		return nil, f, "A transfer moves money between two accounts."
@@ -538,10 +558,12 @@ func inSlice(s string, list []string) bool {
 	return false
 }
 
-// parseRef splits and validates an encoded "type:id" reference.
+// parseRef splits and validates an encoded "type:id" endpoint reference
+// ("account:3" / "party:7"). The merchant endpoint died in Gate 3c — the
+// merchant is a display attribute (merchant_id), never an endpoint.
 func parseRef(v string) (string, int64, error) {
 	parts := strings.SplitN(v, ":", 2)
-	if len(parts) != 2 || !inSlice(parts[0], []string{"account", "merchant", "counterparty"}) {
+	if len(parts) != 2 || !inSlice(parts[0], []string{"account", "party"}) {
 		return "", 0, fmt.Errorf("bad reference %q", v)
 	}
 	id, err := strconv.ParseInt(parts[1], 10, 64)
@@ -552,7 +574,7 @@ func parseRef(v string) (string, int64, error) {
 }
 
 // parseParticipantKey splits a split-editor key ("user:N" / "cp:N") into a
-// schema participant_type ("household_user"/"counterparty") and ref.
+// schema participant_type ("household_user"/"party") and ref.
 func parseParticipantKey(key string) (string, int64, error) {
 	parts := strings.SplitN(key, ":", 2)
 	if len(parts) != 2 {
@@ -566,14 +588,24 @@ func parseParticipantKey(key string) (string, int64, error) {
 	case "user":
 		return "household_user", id, nil
 	case "cp":
-		return "counterparty", id, nil
+		return "party", id, nil
 	default:
 		return "", 0, fmt.Errorf("bad participant key %q", key)
 	}
 }
 
+// keysOf maps split parts to their editor keys.
+func keysOf(parts []split.Part) []string {
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = p.Key
+	}
+	return out
+}
+
 // validateRefs checks that every referenced row exists and belongs to the
-// household — polymorphic FKs are app-layer validated (see migration 001).
+// household. The DB now has real FKs for accounts/parties; this is the
+// pre-save UX layer (friendlier errors before the INSERT).
 func (a *App) validateRefs(ctx context.Context, hh int64, s *txnspec) error {
 	refOK := func(table string, id int64) bool {
 		if id <= 0 {
@@ -597,14 +629,17 @@ func (a *App) validateRefs(ctx context.Context, hh int64, s *txnspec) error {
 	if !refOK(s.destType, s.destRef) {
 		return fmt.Errorf("destination not found")
 	}
+	if s.originType == s.destType && s.originRef == s.destRef {
+		return fmt.Errorf("origin and destination are the same entry")
+	}
 	for _, p := range s.parts {
 		typ, id, err := parseParticipantKey(p.Key)
 		if err != nil {
 			return fmt.Errorf("bad participant %q", p.Key)
 		}
-		table := "counterparty"
+		table := "party"
 		if typ == "household_user" {
-			table = `"user"`
+			table = `app_user`
 		}
 		if !refOK(table, id) {
 			return fmt.Errorf("participant not found")
@@ -627,21 +662,21 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 		return
 	}
 
-	// Guard (for phase P5): once a payment has allocated against this
-	// transaction's split rows, the splits can no longer be rewritten —
-	// payment_allocation holds the old split ids.
+	// Guard: once a settlement has allocated against this transaction's
+	// transaction_split rows, the splits can no longer be rewritten —
+	// settlement_allocation holds the old transaction_split ids.
 	if id > 0 {
 		var n int
 		if err := a.Pool.QueryRow(r.Context(), `
-			SELECT count(*) FROM payment_allocation pa
-			JOIN split s ON s.id = pa.split_id
+			SELECT count(*) FROM settlement_allocation pa
+			JOIN transaction_split s ON s.id = pa.split_id
 			WHERE s.transaction_id = $1`, id).Scan(&n); err != nil {
 			http.Error(w, "internal error", 500)
 			return
 		}
 		if n > 0 {
 			http.Redirect(w, r, fmt.Sprintf("/txns/%d?msg=%s", id,
-				url.QueryEscape("Cannot edit: a payment already references this transaction's splits.")),
+				url.QueryEscape("Cannot edit: a settlement already references this transaction's splits.")),
 				http.StatusSeeOther)
 			return
 		}
@@ -668,21 +703,45 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 		charged, orig, rate = spec.charged, spec.original, spec.rate
 	}
 
+	// The four concrete endpoint columns: each side holds one kind.
+	var originAcc, destAcc, originParty, destParty any
+	switch spec.originType {
+	case "account":
+		originAcc = spec.originRef
+	case "party":
+		originParty = spec.originRef
+	}
+	switch spec.destType {
+	case "account":
+		destAcc = spec.destRef
+	case "party":
+		destParty = spec.destRef
+	}
+
+	// Split participants resolve to party ids up front (members -> their
+	// seeded member party row; outsiders -> their party id).
+	partyIDs, err := a.splitEditorKeys(r.Context(), hh, keysOf(spec.parts))
+	if err != nil {
+		a.reRenderForm(w, r, hh, id, f, err.Error())
+		return
+	}
+
 	txnID := id
 	if id == 0 {
 		err = tx.QueryRow(ctx, `
 			INSERT INTO "transaction" (
-				household_id, recorded_by, transaction_date, class,
+				household_id, recorded_by_user_id, transaction_date, class,
 				category_id, merchant_id, description, description_extra,
 				total_amount, charged_currency, amount_original, exchange_rate,
-				origin_type, origin_ref, destination_type, destination_ref,
+				origin_account_id, destination_account_id,
+				origin_party_id, destination_party_id,
 				record_status, source, notes
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8, $9, $10, $11,
 				$12, $13, $14, $15, 'pending', 'manual', $16)
 			RETURNING id`,
 			hh, sess.UserID, spec.date, spec.class,
 			cat, merch, spec.description, spec.total, charged, orig, rate,
-			spec.originType, spec.originRef, spec.destType, spec.destRef,
+			originAcc, destAcc, originParty, destParty,
 			spec.notes).Scan(&txnID)
 		if err != nil {
 			http.Error(w, "create transaction: "+err.Error(), 500)
@@ -695,12 +754,12 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 				category_id = $4, merchant_id = $5, description = $6, notes = $7,
 				total_amount = $8, charged_currency = $9, amount_original = $10,
 				exchange_rate = $11,
-				origin_type = $12, origin_ref = $13,
-				destination_type = $14, destination_ref = $15
+				origin_account_id = $12, destination_account_id = $13,
+				origin_party_id = $14, destination_party_id = $15
 			WHERE id = $1 AND household_id = $16`,
 			txnID, spec.date, spec.class, cat, merch, spec.description,
 			spec.notes, spec.total, charged, orig, rate,
-			spec.originType, spec.originRef, spec.destType, spec.destRef, hh)
+			originAcc, destAcc, originParty, destParty, hh)
 		if err != nil {
 			http.Error(w, "update transaction: "+err.Error(), 500)
 			return
@@ -713,16 +772,15 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 
 	// Splits: replace wholesale. The deferred split-sum trigger (migration
 	// 001) re-checks parent consistency at commit.
-	if _, err := tx.Exec(ctx, `DELETE FROM split WHERE transaction_id = $1`, txnID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM transaction_split WHERE transaction_id = $1`, txnID); err != nil {
 		http.Error(w, "internal error", 500)
 		return
 	}
-	for i, p := range spec.parts {
-		typ, ref, _ := parseParticipantKey(p.Key)
+	for i := range spec.parts {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO split (transaction_id, participant_type, participant_ref, amount)
+			INSERT INTO transaction_split (household_id, transaction_id, party_id, amount)
 			VALUES ($1, $2, $3, $4)`,
-			txnID, typ, ref, spec.shares[i]); err != nil {
+			hh, txnID, partyIDs[i], spec.shares[i]); err != nil {
 			http.Error(w, "internal error", 500)
 			return
 		}
@@ -752,7 +810,7 @@ func (a *App) reRenderForm(w http.ResponseWriter, r *http.Request, hh, id int64,
 	f.ID = id
 	f.Mode = strings.TrimSpace(r.FormValue("split_mode"))
 	f.Classes = txnClasses
-	f.Users, f.CPs = o.Users, o.CPs
+	f.Users, f.Parties = o.Users, o.Parties
 	f.Merchants, f.Cats = o.Merchants, o.Cats
 	o.fillRefSels(f)
 	f.ShareSum = f.shareSumDisplay()
@@ -829,7 +887,7 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 	if f.AccountID > 0 {
 		args = append(args, f.AccountID, f.AccountID)
 		conds = append(conds, fmt.Sprintf(
-			"(t.origin_type = 'account' AND t.origin_ref = $%d) OR (t.destination_type = 'account' AND t.destination_ref = $%d)",
+			"(t.origin_account_id = $%d) OR (t.destination_account_id = $%d)",
 			len(args)-1, len(args)))
 	}
 	if f.Q != "" {
@@ -843,17 +901,15 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.transaction_date, t.description, t.total_amount,
 		       COALESCE(t.charged_currency, ''), COALESCE(t.amount_original, 0),
 		       t.record_status, COALESCE(c.name, ''), COALESCE(m.name, ''),
-		       COALESCE(oa.name, COALESCE(om.name, COALESCE(oc.name, ''))),
-		       COALESCE(da.name, COALESCE(dm.name, COALESCE(dc.name, '')))
+		       COALESCE(oa.name, COALESCE(oc.name, COALESCE(m.name, ''))),
+		       COALESCE(da.name, COALESCE(dc.name, ''))
 		FROM "transaction" t
 		LEFT JOIN category c      ON c.id = t.category_id
 		LEFT JOIN merchant m      ON m.id = t.merchant_id
-		LEFT JOIN account oa      ON t.origin_type = 'account'      AND oa.id = t.origin_ref
-		LEFT JOIN merchant om     ON t.origin_type = 'merchant'     AND om.id = t.origin_ref
-		LEFT JOIN counterparty oc ON t.origin_type = 'counterparty' AND oc.id = t.origin_ref
-		LEFT JOIN account da      ON t.destination_type = 'account'      AND da.id = t.destination_ref
-		LEFT JOIN merchant dm     ON t.destination_type = 'merchant'     AND dm.id = t.destination_ref
-		LEFT JOIN counterparty dc ON t.destination_type = 'counterparty' AND dc.id = t.destination_ref
+		LEFT JOIN account oa ON oa.id = t.origin_account_id
+		LEFT JOIN party oc       ON oc.id = t.origin_party_id
+		LEFT JOIN account da ON da.id = t.destination_account_id
+		LEFT JOIN party dc       ON dc.id = t.destination_party_id
 		WHERE ` + strings.Join(conds, " AND ") + `
 		ORDER BY t.transaction_date DESC, t.id DESC
 		LIMIT 200`, args...)
@@ -1020,16 +1076,23 @@ type txnDetail struct {
 	Charged      string
 	Original     string
 	Rate         string
-	OriginType   string
 	OriginLabel  string
-	DestType     string
 	DestLabel    string
 	Status       string
 	Source       string
 	RecordedBy   string
 	Splits       []splitLine
 	HasAllocs    bool
+	Settlements  []settlementDetailLine
 	ReceiptPath  string
+}
+
+// settlementDetailLine is one settlement allocated against this
+// transaction's splits (the detail page's "Settlements" section).
+type settlementDetailLine struct {
+	Date   time.Time
+	Payer  string
+	Amount money.Money
 }
 
 func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
@@ -1052,28 +1115,24 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.transaction_date, t.class, t.description, t.notes,
 		       t.total_amount, t.record_status, t.source,
 		       COALESCE(u.display_name, ''),
-		       t.origin_type,
-		       COALESCE(oa.name, COALESCE(om.name, COALESCE(oc.name, ''))),
-		       t.destination_type,
-		       COALESCE(da.name, COALESCE(dm.name, COALESCE(dc.name, ''))),
+		       COALESCE(oa.name, COALESCE(oc.name, COALESCE(m2.name, ''))),
+		       COALESCE(da.name, COALESCE(dc.name, '')),
 		       COALESCE(t.charged_currency, ''), COALESCE(t.amount_original, 0),
 		       COALESCE(t.exchange_rate, 0), COALESCE(t.merchant_id, 0), COALESCE(t.category_id, 0),
 		       COALESCE(t.receipt_path, ''),
 		       COALESCE(m2.name, ''), COALESCE(c2.name, '')
 		FROM "transaction" t
-		LEFT JOIN "user" u ON u.id = t.recorded_by
-		LEFT JOIN account oa      ON t.origin_type = 'account'      AND oa.id = t.origin_ref
-		LEFT JOIN merchant om     ON t.origin_type = 'merchant'     AND om.id = t.origin_ref
-		LEFT JOIN counterparty oc ON t.origin_type = 'counterparty' AND oc.id = t.origin_ref
-		LEFT JOIN account da      ON t.destination_type = 'account'      AND da.id = t.destination_ref
-		LEFT JOIN merchant dm     ON t.destination_type = 'merchant'     AND dm.id = t.destination_ref
-		LEFT JOIN counterparty dc ON t.destination_type = 'counterparty' AND dc.id = t.destination_ref
+		LEFT JOIN app_user u ON u.id = t.recorded_by_user_id
+		LEFT JOIN account oa ON oa.id = t.origin_account_id
+		LEFT JOIN party oc       ON oc.id = t.origin_party_id
+		LEFT JOIN account da ON da.id = t.destination_account_id
+		LEFT JOIN party dc       ON dc.id = t.destination_party_id
 		LEFT JOIN merchant m2 ON m2.id = t.merchant_id
 		LEFT JOIN category c2 ON c2.id = t.category_id
 		WHERE t.id = $1 AND t.household_id = $2`, id, hh).
 		Scan(&t.ID, &t.Date, &t.Class, &t.Description, &t.Notes, &t.Total,
 			&t.Status, &t.Source, &t.RecordedBy,
-			&t.OriginType, &t.OriginLabel, &t.DestType, &t.DestLabel,
+			&t.OriginLabel, &t.DestLabel,
 			&charged, &orig, &rate, &mers, &catsel, &t.ReceiptPath,
 			&merch, &cat)
 	if err != nil {
@@ -1092,17 +1151,11 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 
 	// Splits.
 	rows, err := a.Pool.Query(ctx, `
-		SELECT s.amount,
-		       COALESCE(
-		         CASE s.participant_type
-		           WHEN 'household_user' THEN u.display_name
-		           WHEN 'counterparty' THEN cp.name
-		         END, 'Unknown participant')
-		FROM split s
-		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
-		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND cp.id = s.participant_ref
+		SELECT s.amount, COALESCE(p.name, 'Unknown participant')
+		FROM transaction_split s
+		LEFT JOIN party p ON p.id = s.party_id
 		WHERE s.transaction_id = $1
-		ORDER BY (s.participant_type = 'counterparty'), s.participant_ref`, id)
+		ORDER BY COALESCE(p.app_user_id, 0) = 0, s.id`, id)
 	if err != nil {
 		http.Error(w, "load splits: "+err.Error(), 500)
 		return
@@ -1123,10 +1176,37 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 
 	var an int
 	_ = a.Pool.QueryRow(ctx, `
-		SELECT count(*) FROM payment_allocation pa
-		JOIN split s ON s.id = pa.split_id
+		SELECT count(*) FROM settlement_allocation pa
+		JOIN transaction_split s ON s.id = pa.split_id
 		WHERE s.transaction_id = $1`, id).Scan(&an)
 	t.HasAllocs = an > 0
+
+	// Settlements allocated against this transaction's splits (the new
+	// "Settlements" section: transaction -> its settlements).
+	t.Settlements = nil
+	srows, err := a.Pool.Query(ctx, `
+		SELECT p.payment_date, COALESCE(u.display_name, '—'), SUM(pa.amount)
+		FROM settlement_allocation pa
+		JOIN settlement p ON p.id = pa.payment_id
+		JOIN transaction_split s ON s.id = pa.split_id
+		LEFT JOIN app_user u ON u.id = p.paid_by_user_id
+		WHERE s.transaction_id = $1
+		GROUP BY p.payment_date, p.id, u.display_name
+		ORDER BY p.payment_date, p.id`, id)
+	if err != nil {
+		http.Error(w, "load settlements: "+err.Error(), 500)
+		return
+	}
+	for srows.Next() {
+		var sl settlementDetailLine
+		if err := srows.Scan(&sl.Date, &sl.Payer, &sl.Amount); err != nil {
+			srows.Close()
+			http.Error(w, "scan settlement: "+err.Error(), 500)
+			return
+		}
+		t.Settlements = append(t.Settlements, sl)
+	}
+	srows.Close()
 
 	a.render(w, r, http.StatusOK, "txn_detail.html", map[string]any{
 		"Title":    "Transaction",
@@ -1165,8 +1245,8 @@ func (a *App) handleTxnStatus(w http.ResponseWriter, r *http.Request) {
 	if target != "void" {
 		var n int
 		_ = a.Pool.QueryRow(ctx, `
-			SELECT count(*) FROM payment_allocation pa
-			JOIN split s ON s.id = pa.split_id
+			SELECT count(*) FROM settlement_allocation pa
+			JOIN transaction_split s ON s.id = pa.split_id
 			WHERE s.transaction_id = $1`, id).Scan(&n)
 		if n > 0 {
 			http.Redirect(w, r, fmt.Sprintf("/txns/%d?msg=%s", id,

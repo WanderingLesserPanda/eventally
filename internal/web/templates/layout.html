@@ -26,7 +26,7 @@
     <a href="/accounts" class="{{if hasPrefix .Path "/accounts"}}active{{end}}">Accounts</a>
     <a href="/categories" class="{{if hasPrefix .Path "/categories"}}active{{end}}">Categories</a>
     <a href="/merchants" class="{{if hasPrefix .Path "/merchants"}}active{{end}}">Merchants</a>
-    <a href="/counterparties" class="{{if hasPrefix .Path "/counterparties"}}active{{end}}">Counterparties</a>
+    <a href="/parties" class="{{if hasPrefix .Path "/parties"}}active{{end}}">Parties</a>
   </nav>
   <div class="user">
     <form method="post" action="/logout" style="display:inline">{{template "csrf" .}}<button class="btn-link">Sign out</button></form>

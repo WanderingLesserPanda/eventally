@@ -36,13 +36,25 @@
   {{else}}
   <p class="muted">No splits recorded.</p>
   {{end}}
-  {{if $t.HasAllocs}}<p class="muted small">A payment already references these splits — this transaction can no longer be edited or have its status changed.</p>{{end}}
+  {{if $t.HasAllocs}}<p class="muted small">A settlement already references these splits — this transaction can no longer be edited or have its status changed.</p>{{end}}
+
+  <h2>Settlements</h2>
+  {{if $t.Settlements}}
+  <table>
+    <tr><th>Date</th><th>Payer</th><th class="money">Amount</th></tr>
+    {{range $t.Settlements}}
+    <tr><td>{{date .Date}}</td><td>{{orDash .Payer}}</td><td class="money">{{money .Amount}}</td></tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="muted">No settlements recorded against this transaction.</p>
+  {{end}}
 
   <h2>Status</h2>
   {{range .Statuses}}
   {{if ne . $t.Status}}
   <form method="post" action="/txns/{{$t.ID}}/status" style="display:inline"
-        {{if $t.HasAllocs}}onsubmit="return confirm('A payment references this transaction. Change status anyway?')"{{end}} >
+        {{if $t.HasAllocs}}onsubmit="return confirm('A settlement references this transaction. Change status anyway?')"{{end}} >
     {{template "csrf" $root}}
     <input type="hidden" name="status" value="{{.}}">
     <button class="btn small {{if eq . "void"}}btn-danger{{end}}">Mark {{.}}</button>

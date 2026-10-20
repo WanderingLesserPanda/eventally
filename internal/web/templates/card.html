@@ -5,7 +5,7 @@
       <h1>{{.C.Name}} {{if .C.Institution}}<span class="muted">· {{.C.Institution}}</span>{{end}}</h1>
       {{if .C.CardType}}<span class="tag">{{.C.CardType}}</span>{{end}}
     </div>
-    <a class="btn btn-primary" href="/cards/{{.C.ID}}/pay">Record payment</a>
+    <a class="btn btn-primary" href="/cards/{{.C.ID}}/pay">Record settlement</a>
   </div>
 
   <div class="grid">
@@ -21,6 +21,13 @@
     <div class="stat card">
       <div class="stat-label">Credit limit</div>
       <div class="stat-value">{{money .C.CreditLimit}}</div>
+    </div>
+    {{end}}
+    {{if gt .C.UnappliedCredit 0}}
+    <div class="stat card">
+      <div class="stat-label">Unapplied credit</div>
+      <div class="stat-value">{{money .C.UnappliedCredit}}</div>
+      <div class="muted small">Payment money not yet absorbed by split allocations — later settlements use it up.</div>
     </div>
     {{end}}
   </div>
@@ -113,18 +120,19 @@
   <p class="muted">No unpaid items.</p>
   {{end}}
 
-  <h2>Payment history</h2>
+  <h2>Settlement history</h2>
   {{if .C.Payments}}
   {{range .C.Payments}}
   <div class="card" style="margin-bottom:0.8rem">
     <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap">
       <strong>{{money .Amount}}</strong>
+      {{if gt .Credit 0}}<span class="tag" title="Part of this settlement was not allocated to any item — it is carried as unapplied credit.">credit {{money .Credit}}</span>{{end}}
       <span class="tag">{{.Method}}</span>
       <span class="muted">{{date .Date}} · paid by {{.PaidBy}}</span>
       {{if .Notes}}<span class="muted small">· {{.Notes}}</span>{{end}}
       {{if gt .LedgerID 0}}<span class="tag approved" title="Wrote the savings → card transfer to the ledger">ledger</span>{{end}}
-      <form method="post" action="/payments/{{.ID}}/delete" style="margin-left:auto;display:inline"
-            onsubmit="return confirm('Delete this payment and its allocations?')">
+      <form method="post" action="/settlements/{{.ID}}/delete" style="margin-left:auto;display:inline"
+            onsubmit="return confirm('Delete this settlement and its allocations?')">
         <button class="btn-link btn-danger">Delete</button>
       </form>
     </div>
@@ -145,7 +153,7 @@
   </div>
   {{end}}
   {{else}}
-  <p class="muted">No payments recorded yet.</p>
+  <p class="muted">No settlements recorded yet.</p>
   {{end}}
 </div>
 {{end}}

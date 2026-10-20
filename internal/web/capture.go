@@ -185,9 +185,9 @@ func (a *App) capturePOST(w http.ResponseWriter, r *http.Request) {
 			fail("A participant is invalid.")
 			return
 		}
-		table := "counterparty"
+		table := "party"
 		if typ == "household_user" {
-			table = `"user"`
+			table = `app_user`
 		}
 		var n int
 		if err := a.Pool.QueryRow(ctx,
@@ -219,37 +219,40 @@ func (a *App) capturePOST(w http.ResponseWriter, r *http.Request) {
 	if merchID > 0 {
 		merch = merchID
 	}
-	// Destination: the merchant when known; otherwise the card account
-	// itself (an expense is "money leaving to the card" — the full form
-	// can re-point it later).
-	destType, destRef := "merchant", merchID
-	if destRef <= 0 {
-		destType, destRef = "account", cardID
-	}
+	// Destination: the merchant display attribute when known, otherwise
+	// nothing extra — the expense's origin is the card account itself.
+	// (Gate 3c: the merchant is no longer an endpoint.)
+	var destAcc, destParty any
 	var txnID int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO "transaction" (
-			household_id, recorded_by, transaction_date, class,
+			household_id, recorded_by_user_id, transaction_date, class,
 			category_id, merchant_id, description, description_extra,
-			total_amount, origin_type, origin_ref, destination_type, destination_ref,
+			total_amount, origin_account_id, destination_account_id,
+			destination_party_id,
 			record_status, source, notes
 		) VALUES ($1, $2, $3, 'expense', NULL, $4, $5, '', $6,
-			'account', $7, $8, $9,
+			$7, $8, $9,
 			'pending', 'manual', '')
 		RETURNING id`,
 		hh, sess.UserID, dateStr, merch, desc, total, cardID,
-		destType, destRef).
+		destAcc, destParty).
 		Scan(&txnID)
 	if err != nil {
 		http.Error(w, "create transaction: "+err.Error(), 500)
 		return
 	}
-	for i, k := range parts {
-		typ, ref, _ := parseParticipantKey(k)
+	partyIDs, err := a.splitEditorKeys(ctx, hh, parts)
+	if err != nil {
+		tx.Rollback(ctx)
+		http.Error(w, "bad participant: "+err.Error(), 400)
+		return
+	}
+	for i := range parts {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO split (transaction_id, participant_type, participant_ref, amount)
+			INSERT INTO transaction_split (household_id, transaction_id, party_id, amount)
 			VALUES ($1, $2, $3, $4)`,
-			txnID, typ, ref, shares[i]); err != nil {
+			hh, txnID, partyIDs[i], shares[i]); err != nil {
 			http.Error(w, "internal error", 500)
 			return
 		}
@@ -268,7 +271,7 @@ func (a *App) capturePOST(w http.ResponseWriter, r *http.Request) {
 func (a *App) loadUsers(ctx context.Context, hh int64) ([]opt, error) {
 	var users []opt
 	rows, err := a.Pool.Query(ctx,
-		`SELECT id, display_name FROM "user" WHERE household_id = $1 ORDER BY id`, hh)
+		`SELECT id, display_name FROM app_user WHERE household_id = $1 ORDER BY id`, hh)
 	if err != nil {
 		return nil, err
 	}

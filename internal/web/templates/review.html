@@ -6,7 +6,7 @@
   </div>
   <p class="muted small">Entries from quick capture, recurring templates and
   imports land here until the monthly check. Approve to confirm them, or void
-  to discard. Rows a payment already references are skipped on bulk actions.</p>
+  to discard. Rows a settlement already references are skipped on bulk actions.</p>
   {{if .List}}
   <form method="post" action="/review/bulk">
     {{template "csrf" $root}}

@@ -109,14 +109,14 @@ func (a *App) Router() http.Handler {
 		authed.Post("/merchants/{id}", a.handleMerchantEdit)
 		authed.Post("/merchants/{id}/deactivate", a.handleMerchantDelete)
 
-		authed.Get("/counterparties", a.listCounterparties)
-		authed.Get("/counterparties/new", a.handleCounterpartyCreate)
-		authed.Post("/counterparties", a.handleCounterpartyCreate)
-		authed.Get("/counterparties/{id}", a.handleCounterpartyEdit)
-		authed.Post("/counterparties/{id}", a.handleCounterpartyEdit)
-		authed.Post("/counterparties/{id}/deactivate", a.handleCounterpartyDelete)
+		authed.Get("/parties", a.listParties)
+		authed.Get("/parties/new", a.handlePartyCreate)
+		authed.Post("/parties", a.handlePartyCreate)
+		authed.Get("/parties/{id}", a.handlePartyEdit)
+		authed.Post("/parties/{id}", a.handlePartyEdit)
+		authed.Post("/parties/{id}/deactivate", a.handlePartyDelete)
 
-		// Phase P3: transactions (list, form w/ split editor, detail, status, receipts).
+		// Phase P3: transactions (list, form w/ transaction_split editor, detail, status, receipts).
 		authed.Get("/txns", a.listTxns)
 		authed.Get("/txns/new", a.handleTxnCreate)
 		authed.Post("/txns", a.handleTxnCreate)
@@ -137,7 +137,7 @@ func (a *App) Router() http.Handler {
 		authed.Get("/cards/{id}", a.handleCardDetail)
 		authed.Get("/cards/{id}/pay", a.handleCardPayGet)
 		authed.Post("/cards/{id}/pay", a.handleCardPayPost)
-		authed.Post("/payments/{id}/delete", a.handlePaymentDelete)
+		authed.Post("/settlements/{id}/delete", a.handleSettlementDelete)
 
 		// Phase P6: reconciliation (D8) — monthly anchors + drill-in.
 		authed.Get("/reconcile", a.handleReconcile)
@@ -228,8 +228,8 @@ func (a *App) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	var household, userID int64
 	var hash string
 	err := a.Pool.QueryRow(r.Context(),
-		`SELECT household_id, id, pass_hash
-		 FROM "user" WHERE username = $1`, username).
+		`SELECT household_id, id, password_hash
+		 FROM app_user WHERE username = $1`, username).
 		Scan(&household, &userID, &hash)
 	if err != nil || auth.CheckPassword(hash, password) != nil {
 		http.Redirect(w, r, "/login?err=1", http.StatusSeeOther)

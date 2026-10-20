@@ -6,7 +6,7 @@
     <h1>{{if $f.Editing}}Edit transaction{{else}}New transaction{{end}}</h1>
   </div>
   {{if $f.Err}}<div class="error">{{$f.Err}}</div>{{end}}
-  {{if $f.Locked}}<div class="flash">This transaction can no longer be edited: a payment already references its splits.</div>{{end}}
+  {{if $f.Locked}}<div class="flash">This transaction can no longer be edited: a settlement already references its splits.</div>{{end}}
   <form method="post" action="{{if $f.Editing}}/txns/{{$f.ID}}{{else}}/txns{{end}}">
     {{template "csrf" $root}}
     <div class="form-grid">
@@ -56,11 +56,8 @@
           <optgroup label="Accounts">
             {{range $f.OriginSel.Accounts}}<option value="account:{{.ID}}" {{if eq (printf "account:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
           </optgroup>
-          <optgroup label="Merchants (income from)">
-            {{range $f.OriginSel.Merchants}}<option value="merchant:{{.ID}}" {{if eq (printf "merchant:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
-          </optgroup>
-          <optgroup label="Counterparties (from)">
-            {{range $f.OriginSel.CPs}}<option value="counterparty:{{.ID}}" {{if eq (printf "counterparty:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
+          <optgroup label="Parties (person / organisation)">
+            {{range $f.OriginSel.Parties}}<option value="party:{{.ID}}" {{if eq (printf "party:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
           </optgroup>
         </select>
       </label>
@@ -71,11 +68,8 @@
           <optgroup label="Accounts">
             {{range $f.DestSel.Accounts}}<option value="account:{{.ID}}" {{if eq (printf "account:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
           </optgroup>
-          <optgroup label="Merchants (spent at)">
-            {{range $f.DestSel.Merchants}}<option value="merchant:{{.ID}}" {{if eq (printf "merchant:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
-          </optgroup>
-          <optgroup label="Counterparties (owed to)">
-            {{range $f.DestSel.CPs}}<option value="counterparty:{{.ID}}" {{if eq (printf "counterparty:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
+          <optgroup label="Parties (person / organisation)">
+            {{range $f.DestSel.Parties}}<option value="party:{{.ID}}" {{if eq (printf "party:%d" .ID) $sel}}selected{{end}}>{{.Name}}</option>{{end}}
           </optgroup>
         </select>
       </label>
@@ -100,8 +94,8 @@
             <optgroup label="Household">
               {{$k := $row.Key}}{{range $.F.Users}}<option value="user:{{.ID}}" {{if eq (printf "user:%d" .ID) $k}}selected{{end}}>{{.Name}}</option>{{end}}
             </optgroup>
-            <optgroup label="Counterparties">
-              {{$k := $row.Key}}{{range $.F.CPs}}<option value="cp:{{.ID}}" {{if eq (printf "cp:%d" .ID) $k}}selected{{end}}>{{.Name}}</option>{{end}}
+            <optgroup label="Parties">
+              {{$k := $row.Key}}{{range $.F.Parties}}<option value="cp:{{.ID}}" {{if eq (printf "cp:%d" .ID) $k}}selected{{end}}>{{.Name}}</option>{{end}}
             </optgroup>
           </select>
         </td>
@@ -228,7 +222,7 @@ document.addEventListener('alpine:init', () => {});
       <td><select name="part_key[]" data-partkey>
         <option value="">— not included —</option>
         <optgroup label="Household"></optgroup>
-        <optgroup label="Counterparties"></optgroup>
+        <optgroup label="Parties"></optgroup>
       </select></td>
       <td class="money"><input type="text" name="part_value[]" class="share-input" data-share placeholder="0.00"></td>
       <td class="row-actions"><button type="button" class="btn btn-danger small" data-rmrow>✕</button></td>`;

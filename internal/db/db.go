@@ -16,6 +16,10 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// MigrationsFS exposes the embedded migration set to tests and other
+// packages (db.Open uses it for the app's own boot-time migration).
+var MigrationsFS = migrationsFS
+
 // DB bundles the connection pool with the process lifetime.
 type DB struct {
 	Pool *pgxpool.Pool

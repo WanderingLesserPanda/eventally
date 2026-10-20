@@ -194,13 +194,13 @@ func (a *App) cardRecordedAtFamily(ctx context.Context, hh int64, fam []int64, e
 		                  WHERE a.household_id = $1 AND a.id IN (`+ph+`)), 0)
 		+ COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.origin_type = 'account' AND t.origin_ref IN (`+ph+`)
+		        AND t.origin_account_id IN (`+ph+`)
 		        AND t.transaction_date <= `+datePh+`), 0)
 		- COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.destination_type = 'account' AND t.destination_ref IN (`+ph+`)
+		        AND t.destination_account_id IN (`+ph+`)
 		        AND t.transaction_date <= `+datePh+`), 0)
-		- COALESCE((SELECT SUM(p.amount) FROM payment p
+		- COALESCE((SELECT SUM(p.amount) FROM settlement p
 		              WHERE p.household_id = $1 AND p.ledger_transaction_id IS NULL
 		        AND p.account_id IN (`+ph+`)
 		        AND p.payment_date <= `+datePh+`), 0)`,
@@ -252,14 +252,11 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		chargesTot money.Money
 	)
 	rows, err := a.Pool.Query(ctx, `
-		SELECT COALESCE(CASE s.participant_type
-		                  WHEN 'household_user' THEN u.display_name
-		                  ELSE cp.name END, 'Unknown'),
+		SELECT COALESCE(p.name, 'Unknown'),
 		       SUM(s.amount)
-		FROM split s
+		FROM transaction_split s
 		JOIN "transaction" t ON t.id = s.transaction_id
-		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
-		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND s.participant_ref = cp.id
+		LEFT JOIN party p ON p.id = s.party_id
 		WHERE `+unpaidWhereFor(fam)+`
 		  AND t.transaction_date >= `+mStartPh+` AND t.transaction_date <= `+mEndPh+`
 		GROUP BY 1
@@ -299,7 +296,7 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		FROM "transaction" t
 		LEFT JOIN merchant m ON m.id = t.merchant_id
 		WHERE t.household_id = $1 AND t.record_status <> 'void'
-		  AND t.destination_type = 'account' AND t.destination_ref IN (`+ph+`)
+		  AND t.destination_account_id IN (`+ph+`)
 		  AND t.transaction_date >= `+mStartPh+` AND t.transaction_date <= `+mEndPh+`
 		ORDER BY t.transaction_date, t.id`, append(baseArgs, monthStart, monthEnd)...)
 	if err != nil {
@@ -323,8 +320,8 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err = a.Pool.Query(ctx, `
 		SELECT p.payment_date, 'payment: ' || u.display_name, p.amount
-		FROM payment p
-		JOIN "user" u ON u.id = p.paid_by
+		FROM settlement p
+		JOIN app_user u ON u.id = p.paid_by_user_id
 		WHERE p.household_id = $1 AND p.account_id IN (`+ph+`)
 		  AND p.ledger_transaction_id IS NULL
 		  AND p.payment_date >= `+mStartPh+` AND p.payment_date <= `+mEndPh+`
@@ -354,17 +351,14 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 	rows, err = a.Pool.Query(ctx, `
 		SELECT t.transaction_date,
 		       COALESCE(NULLIF(t.description, ''), m.name, '—'),
-		       COALESCE(CASE s.participant_type
-		                  WHEN 'household_user' THEN u.display_name
-		                  ELSE cp.name END, 'Unknown'),
+		       COALESCE(p.name, 'Unknown'),
 		       s.amount, COALESCE(al.a, 0)
-		FROM split s
+		FROM transaction_split s
 		JOIN "transaction" t ON t.id = s.transaction_id
 		LEFT JOIN merchant m ON m.id = t.merchant_id
-		LEFT JOIN "user" u ON s.participant_type = 'household_user' AND u.id = s.participant_ref
-		LEFT JOIN counterparty cp ON s.participant_type = 'counterparty' AND s.participant_ref = cp.id
+		LEFT JOIN party p ON p.id = s.party_id
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
-		    FROM payment_allocation GROUP BY split_id) al ON al.split_id = s.id
+		    FROM settlement_allocation GROUP BY split_id) al ON al.split_id = s.id
 		WHERE `+unpaidWhereFor(fam)+`
 		  AND t.transaction_date >= `+mStartPh+` AND t.transaction_date <= `+mEndPh+`
 		ORDER BY t.transaction_date, s.id`, append(baseArgs, monthStart, monthEnd)...)
@@ -397,9 +391,9 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 	var actual, recordedBal money.Money
 	var note, byName sql.NullString
 	err = a.Pool.QueryRow(ctx, `
-		SELECT rc.actual_balance, rc.recorded_balance, rc.note, u.display_name
+		SELECT rc.actual_balance, rc.recorded_balance, rc.notes, u.display_name
 		FROM reconciliation rc
-		LEFT JOIN "user" u ON u.id = rc.recorded_by
+		LEFT JOIN app_user u ON u.id = rc.recorded_by_user_id
 		WHERE rc.household_id = $1 AND rc.account_id = $2
 		  AND rc.statement_month = $3`, hh, cardID, monthStart).
 		Scan(&actual, &recordedBal, &note, &byName)
@@ -486,13 +480,13 @@ func (a *App) handleReconcileMonthPost(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := a.Pool.Exec(ctx, `
 		INSERT INTO reconciliation (household_id, account_id, statement_month,
-		                             actual_balance, recorded_balance, note, recorded_by)
+		                             actual_balance, recorded_balance, notes, recorded_by_user_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (household_id, account_id, statement_month)
 		DO UPDATE SET actual_balance = EXCLUDED.actual_balance,
 		              recorded_balance = EXCLUDED.recorded_balance,
-		              note = EXCLUDED.note,
-		              recorded_by = EXCLUDED.recorded_by`,
+		              notes = EXCLUDED.notes,
+		              recorded_by_user_id = EXCLUDED.recorded_by_user_id`,
 		hh, cardID, monthStart, actual, recorded, note, sess.UserID); err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return

@@ -1,7 +1,7 @@
 {{define "page/card_pay"}}
 <div class="page">
   <div class="page-head">
-    <h1>Record payment — {{.F.CardName}}</h1>
+    <h1>Record settlement — {{.F.CardName}}</h1>
     <a class="btn" href="/cards/{{.F.CardID}}">Back to card</a>
   </div>
 
@@ -43,13 +43,15 @@
           {{end}}
         </tbody>
       </table>
+      <p class="muted small">Allocations must not exceed the settlement amount. If they add up to less, the difference is
+      carried as <b>unapplied credit</b> on the card — money taken in that a later settlement can absorb.</p>
     </fieldset>
 
     <div class="form-grid">
-      <label>Payment amount
+      <label>Settlement amount
         <input type="text" name="amount" value="{{.F.Amount}}" required>
       </label>
-      <label>Payment date
+      <label>Settlement date
         <input type="date" name="payment_date" value="{{.F.Date}}" required>
       </label>
       <label>Method
@@ -79,7 +81,7 @@
       </label>
       <p class="muted small" x-show="ledger" style="margin:0.4rem 0 0">
         Keeps the recorded card balance in step with the real one — a
-        split-less, approved balance movement linked to this payment.
+        split-less, approved balance movement linked to this settlement.
       </p>
       <div class="form-grid" x-show="ledger" style="margin-top:0.6rem">
         <label>From account (asset)
@@ -94,7 +96,7 @@
     </div>
 
     <div class="form-actions">
-      <button class="btn btn-primary">Record payment ({{money .F.AllocSum}})</button>
+      <button class="btn btn-primary">Record settlement ({{money .F.AllocSum}}</button>
       <a class="btn" href="/cards/{{.F.CardID}}">Cancel</a>
     </div>
   </form>
