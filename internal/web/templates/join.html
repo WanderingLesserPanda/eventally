@@ -1,0 +1,27 @@
+{{define "page/join"}}
+<div class="card auth-card">
+  <h1>Join a household</h1>
+  <p class="muted">Ask a household admin for an invite code, then create your account.</p>
+  {{if .F.Pending}}
+  <div class="flash">
+    <strong>This username already exists.</strong> Please sign in first, then join from the app — your invite has been held for one hour.
+  </div>
+  {{end}}
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  <form method="post" action="/join">
+    <label>Invite code
+      <input type="text" name="code" required value="{{.F.Code}}" autofocus autocomplete="off">
+    </label>
+    <label>Username (new)
+      <input type="text" name="username" required value="{{.F.Username}}" autocomplete="username">
+    </label>
+    <label>Display name
+      <input type="text" name="display_name" required value="{{.F.DisplayName}}">
+    </label>
+    <label>Password
+      <input type="password" name="password" required autocomplete="new-password">
+    </label>
+    <button type="submit" class="btn-primary">Join</button>
+  </form>
+</div>
+{{end}}

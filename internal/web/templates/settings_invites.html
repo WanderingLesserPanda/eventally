@@ -1,0 +1,65 @@
+{{define "page/settings_invites"}}
+{{template "settings-tabs" .}}
+<div class="card">
+  <h1>Invites</h1>
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+  {{if .Created}}
+  <div class="flash" style="border-color:#2e7d32;color:#1b5e20">
+    <strong>Invite created — share it now, it will not be shown again:</strong><br>
+    <code style="font-size:1.1rem;letter-spacing:.05em">{{.Created.Code}}</code><br>
+    <span class="muted small">Expiry: {{.Created.Days}} day(s). Join page: <a href="{{.JoinURL}}">{{.JoinURL}}</a> (or share just the code — the code is the key.)</span>
+  </div>
+  {{end}}
+
+  <h2 style="font-size:1rem">Outstanding ({{if .Invites}}{{len .Invites}}{{else}}0{{end}} of 5)</h2>
+  {{if .Invites}}
+  <table style="width:100%">
+    <tr><th>Code</th><th>Created</th><th>Expires</th><th>By</th><th></th></tr>
+    {{range .Invites}}
+    <tr>
+      <td><code>{{.Prefix}}…</code></td>
+      <td>{{date .Created}}</td>
+      <td>{{date .Expires}}</td>
+      <td>{{.CreatedBy}}</td>
+      <td>
+        <form method="post" action="/settings/invite/revoke/{{.ID}}" style="display:inline">
+          {{template "csrf" $}}
+          <input type="hidden" name="invite_id" value="{{.ID}}">
+          <button type="submit" class="btn-link" onclick="return confirm('Revoke this code? It stops working immediately.')">Revoke</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="muted">No outstanding invites.</p>
+  {{end}}
+
+  <h2 style="font-size:1rem">New invite</h2>
+  <form method="post" action="/settings/invite" class="row" style="gap:.5rem;align-items:end">
+    {{template "csrf" .}}
+    <label>Expiry override
+      <select name="expiry_days">
+        <option value="">Default ({{.DefaultExpiry}} day(s))</option>
+        {{range .ExpiryDays}}
+        <option value="{{.}}"{{if eq . $.New.Expiry}} selected{{end}}>{{.}} day(s)</option>
+        {{end}}
+      </select>
+    </label>
+    <button type="submit" class="btn-primary">Create invite</button>
+  </form>
+  <p class="muted small">The household default expiry is {{.DefaultExpiry}} day(s). Update it below.</p>
+  <form method="post" action="/settings/invite/expiry" class="row" style="gap:.5rem;align-items:end">
+    {{template "csrf" .}}
+    <label>Household default expiry
+      <select name="expiry_days">
+        {{range .ExpiryDays}}
+        <option value="{{.}}"{{if eq . $.DefaultExpiry}} selected{{end}}>{{.}} day(s)</option>
+        {{end}}
+      </select>
+    </label>
+    <button type="submit" class="btn-link">Save default</button>
+  </form>
+</div>
+{{end}}

@@ -1,0 +1,15 @@
+{{define "page/dashboard_no_household"}}
+<div class="card auth-card" style="max-width:34rem">
+  <h1>You do not seem to belong to any Household</h1>
+  <p class="muted">
+    Your account has no active household membership (an invite may have been
+    revoked, or your household was removed). You can start a new household as
+    its owner, or join one with an invite code.
+  </p>
+  <div class="row" style="gap:.5rem">
+    <a class="btn-primary" href="/households/new">Create a new Household</a>
+    <a class="btn-link" href="/join-with-code">Join with a code…</a>
+  </div>
+  <p class="muted small">Or <a href="/settings">open Settings</a> to review your options.</p>
+</div>
+{{end}}

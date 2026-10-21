@@ -255,3 +255,60 @@ body.setup-page {
 @media (max-width: 760px) {
   .acct-hero { grid-template-columns: 1fr; }
 }
+
+/* D28: household switcher, new-household modal, join modal, settings tabs,
+   grant rows. */
+.hh-switcher { position: relative; }
+.hh-current {
+  background: none; border: 1px solid var(--line); border-radius: 8px;
+  padding: 0.35rem 0.7rem; font: inherit; font-weight: 600; color: var(--ink);
+  cursor: pointer;
+}
+.hh-current:hover { border-color: var(--accent); color: var(--accent); }
+.hh-menu {
+  position: absolute; right: 0; top: calc(100% + 0.35rem); z-index: 30;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(28, 36, 48, 0.12); min-width: 16rem; padding: 0.35rem 0;
+}
+.hh-menu-title {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted); padding: 0.3rem 0.9rem 0.15rem;
+}
+.hh-sep { border: 0; border-top: 1px solid var(--line); margin: 0.3rem 0; }
+.hh-item {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  padding: 0.45rem 0.9rem; font: inherit; color: var(--ink); cursor: pointer;
+}
+a.hh-item { cursor: pointer; }
+.hh-item:hover { background: var(--bg); color: var(--accent); }
+.hh-item.current { color: var(--muted); cursor: default; }
+.hh-modal-backdrop, .join-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(28, 36, 48, 0.4); z-index: 40;
+  display: flex; align-items: center; justify-content: center; padding: 1rem;
+}
+.hh-modal, .join-modal {
+  background: var(--card); border-radius: 12px; padding: 1.3rem 1.5rem;
+  width: 100%; max-width: 24rem; box-shadow: 0 16px 48px rgba(28, 36, 48, 0.25);
+}
+.hh-modal h3, .join-modal h2 { margin-top: 0; }
+[x-cloak] { display: none !important; }
+
+.tabs { display: flex; gap: 0.4rem; margin-bottom: 1rem; border-bottom: 1px solid var(--line); }
+.tabs a {
+  padding: 0.5rem 0.9rem; color: var(--muted); font-weight: 600; font-size: 0.9rem;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tabs a:hover { color: var(--ink); }
+.tabs a.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.grant-row {
+  display: flex; align-items: flex-start; gap: 1.2rem; flex-wrap: wrap;
+  padding: 0.7rem 0; border-bottom: 1px solid var(--line);
+}
+.grant-row:last-of-type { border-bottom: 0; }
+.grant-who { min-width: 9rem; }
+.grant-controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; flex: 1; }
+.grant-controls label { display: flex; align-items: center; gap: 0.35rem; margin: 0; font-weight: 500; font-size: 0.88rem; }
+.grant-controls input[type=checkbox] { width: auto; margin: 0; }
+.grant-controls select { width: auto; margin-top: 0; }
+.grant-admin { border-left: 1px solid var(--line); padding-left: 1rem; }

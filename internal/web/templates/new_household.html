@@ -1,0 +1,29 @@
+{{define "page/new_household"}}
+<div class="card auth-card">
+  <h1>New household</h1>
+  <p class="muted">You'll be the owner of this new household and land in it once it's created.</p>
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  <form method="post" action="/households/new">
+    {{template "csrf" .}}
+    <label>Name
+      <input type="text" name="name" required maxlength="80" value="{{.F.Name}}" autofocus
+             placeholder="e.g. Our other place">
+    </label>
+    <label>Base currency
+      <select name="currency">
+        {{range $i, $c := .Currencies}}
+        <option value="{{$c}}"{{if eq $i 0}} selected{{end}}>{{$c}}</option>
+        {{end}}
+      </select>
+    </label>
+    <label>First day of the week
+      <select name="first_day">
+        {{range .FirstDays}}
+        <option value="{{.Value}}"{{if eq .Value $.F.FirstDay}} selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </label>
+    <button type="submit" class="btn-primary">Create household</button>
+  </form>
+</div>
+{{end}}

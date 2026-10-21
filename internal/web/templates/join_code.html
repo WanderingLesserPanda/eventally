@@ -1,0 +1,14 @@
+{{define "page/join_code"}}
+<div class="card auth-card">
+  <h1>Join with code</h1>
+  <p class="muted">Already have an account? Enter the invite code to join that household. You'll be added as a member and land in it.</p>
+  {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
+  <form method="post" action="/join-with-code">
+    {{template "csrf" .}}
+    <label>Invite code
+      <input type="text" name="code" required value="{{.F.Code}}" autofocus autocomplete="off">
+    </label>
+    <button type="submit" class="btn-primary">Join</button>
+  </form>
+</div>
+{{end}}

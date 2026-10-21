@@ -28,7 +28,50 @@
     <a href="/merchants" class="{{if hasPrefix .Path "/merchants"}}active{{end}}">Merchants</a>
     <a href="/parties" class="{{if hasPrefix .Path "/parties"}}active{{end}}">Parties</a>
   </nav>
-  <div class="user">
+  <div class="user" x-data="{ open: false, confirmNew: false }">
+    {{if .Switcher}}
+    <div class="hh-switcher">
+      <button type="button" @click="open = !open" class="hh-current" aria-haspopup="true">
+        {{.HouseholdName}} <span class="caret">▾</span>
+      </button>
+      <div x-show="open" @click.outside="open = false" x-cloak class="hh-menu">
+        <div class="hh-menu-title">Switch household</div>
+        {{range .Switcher}}
+          {{if .IsCurrent}}
+          <div class="hh-item current">{{.Name}}<span class="muted small"> (current)</span></div>
+          {{else}}
+          <form method="post" action="/households/switch">
+            {{template "csrf" $}}
+            <input type="hidden" name="household_id" value="{{.HouseholdID}}">
+            <button type="submit" class="hh-item">{{.Name}}</button>
+          </form>
+          {{end}}
+        {{end}}
+        <hr class="hh-sep">
+        <a class="hh-item" href="/join-with-code">Join with code…</a>
+        <button type="button" class="hh-item" @click="open = false; confirmNew = true">＋ New household</button>
+      </div>
+    </div>
+    {{end}}
+    {{if .Session}}
+    <div x-show="confirmNew" x-cloak class="hh-modal-backdrop" @click.self="confirmNew = false">
+      <div class="hh-modal" role="dialog" aria-modal="true" aria-label="Create a new household">
+        <h3>New household</h3>
+        <p class="muted small">You'll be the owner of this new household. This cannot be undone.</p>
+        <form method="post" action="/households/new">
+          {{template "csrf" .}}
+          <label>Name
+            <input type="text" name="name" required maxlength="80" placeholder="e.g. Our other place">
+          </label>
+          <p class="muted small">Base currency defaults to MYR; first day of the week to Monday.</p>
+          <div class="row">
+            <button type="submit" class="btn-primary">Create household</button>
+            <button type="button" class="btn-link" @click="confirmNew = false">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {{end}}
     <form method="post" action="/logout" style="display:inline">{{template "csrf" .}}<button class="btn-link">Sign out</button></form>
   </div>
 </header>

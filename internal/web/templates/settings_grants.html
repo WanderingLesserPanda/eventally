@@ -1,0 +1,104 @@
+{{define "page/settings_grants"}}
+{{template "settings-tabs" .}}
+
+<div class="card">
+  <h1>Household grants</h1>
+  <p class="muted small">
+    Rights over accounts <em>as objects</em> for each member of this
+    household. Implied rights are forced (Create needs Read, Edit needs
+    Create, Delete needs Edit, Delete = all forces Edit = all); the server
+    rejects combinations the database would refuse. The owner's rights are
+    implicit and cannot be changed here.
+  </p>
+  {{range .HouseholdGrants}}
+  <div class="grant-row">
+    <div class="grant-who">
+      {{.Display}}<br>
+      <span class="muted small">{{.Username}}{{if eq .Role "owner"}} · owner{{end}}</span>
+    </div>
+    {{if .IsOwner}}
+    <div class="muted small">Full access — the owner row is locked (no grants to manage).</div>
+    {{else}}
+    <form method="post" action="/settings/grants/household/{{.UserID}}" class="grant-controls">
+      {{template "csrf" $}}
+      <label><input type="checkbox" name="can_read" value="1"{{if .Read}} checked{{end}}> Read</label>
+      <label><input type="checkbox" name="can_create" value="1"{{if .Create}} checked{{end}}> Create</label>
+      <label><input type="checkbox" name="can_edit" value="1"{{if .Edit}} checked{{end}}> Edit</label>
+      <label><input type="checkbox" name="can_delete" value="1"{{if .Delete}} checked{{end}}> Delete</label>
+      <label>Edit scope
+        <select name="edit_mode">
+          <option value="created"{{if eq .EditMode "created"}} selected{{end}}>created</option>
+          <option value="all"{{if eq .EditMode "all"}} selected{{end}}>all</option>
+        </select>
+      </label>
+      <label>Delete scope
+        <select name="delete_mode">
+          <option value="created"{{if eq .DeleteMode "created"}} selected{{end}}>created</option>
+          <option value="all"{{if eq .DeleteMode "all"}} selected{{end}}>all</option>
+        </select>
+      </label>
+      <label class="grant-admin"><input type="checkbox" name="is_admin" value="1"{{if .Admin}} checked{{end}}> Admin</label>
+      <button type="submit" class="btn-primary">Save</button>
+    </form>
+    {{end}}
+  </div>
+  {{end}}
+  <p class="muted small">
+    Uncheck Read (and leave Admin off) to remove a member's household grant
+    entirely. Saving a row forces the implied rights server-side and shows a
+    clear error if the combination is invalid.
+  </p>
+</div>
+
+{{range .Accounts}}
+<div class="card">
+  <h2>{{.Name}} <span class="muted small">— per-member record grants</span></h2>
+  <p class="muted small">
+    Rights over <em>records</em> on this account. Related = a member's own
+    slice (recorded by them, split party, settlement payer); All = every
+    record. Edit = All forces View = All; Delete = All forces both.
+  </p>
+  {{if .Members}}
+  {{range .Members}}
+  <div class="grant-row">
+    <div class="grant-who">{{.Username}}{{if .IsOwner}} <span class="muted small">· owner</span>{{end}}</div>
+    {{if .IsOwner}}
+    <div class="muted small">Full access — the owner row is locked (no grants to manage).</div>
+    {{else}}
+    <form method="post" action="/settings/grants/account" class="grant-controls">
+      {{template "csrf" $}}
+      <input type="hidden" name="user_id" value="{{.UserID}}">
+      <input type="hidden" name="account_id" value="{{$.AccountID}}">
+      <label><input type="checkbox" name="can_read" value="1"{{if .Read}} checked{{end}}> Read</label>
+      <label><input type="checkbox" name="can_create" value="1"{{if .Create}} checked{{end}}> Create</label>
+      <label><input type="checkbox" name="can_edit" value="1"{{if .Edit}} checked{{end}}> Edit</label>
+      <label><input type="checkbox" name="can_delete" value="1"{{if .Delete}} checked{{end}}> Delete</label>
+      <label>View
+        <select name="view_mode">
+          <option value="Related"{{if eq .ViewMode "Related"}} selected{{end}}>Related</option>
+          <option value="All"{{if eq .ViewMode "All"}} selected{{end}}>All</option>
+        </select>
+      </label>
+      <label>Edit
+        <select name="edit_mode">
+          <option value="Related"{{if eq .EditMode "Related"}} selected{{end}}>Related</option>
+          <option value="All"{{if eq .EditMode "All"}} selected{{end}}>All</option>
+        </select>
+      </label>
+      <label>Delete
+        <select name="delete_mode">
+          <option value="Related"{{if eq .DeleteMode "Related"}} selected{{end}}>Related</option>
+          <option value="All"{{if eq .DeleteMode "All"}} selected{{end}}>All</option>
+        </select>
+      </label>
+      <button type="submit" class="btn-primary">Save</button>
+    </form>
+    {{end}}
+  </div>
+  {{end}}
+  {{else}}
+  <p class="muted small">No members have grants on this account yet. (Accounts a member created are auto-granted full access to that member.)</p>
+  {{end}}
+</div>
+{{end}}
+{{end}}

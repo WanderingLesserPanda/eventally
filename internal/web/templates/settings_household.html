@@ -1,0 +1,36 @@
+{{define "settings-tabs"}}
+<div class="tabs">
+  <a href="/settings" class="{{if eq .Tab "household"}}active{{end}}">Household</a>
+  {{if .CanManage}}
+  <a href="/settings?tab=invites" class="{{if eq .Tab "invites"}}active{{end}}">Invites</a>
+  <a href="/settings?tab=grants" class="{{if eq .Tab "grants"}}active{{end}}">Grants</a>
+  {{end}}
+</div>
+{{end}}
+
+{{define "page/settings_household"}}
+{{template "settings-tabs" .}}
+<div class="card">
+  <h1>Default household</h1>
+  <p class="muted small">Where you land when you sign in. (Disabled while you belong to exactly one household.)</p>
+  {{if .Err}}<div class="error">{{.Err}}</div>{{end}}
+  {{if .Memberships}}
+  <form method="post" action="/settings/household">
+    {{template "csrf" .}}
+    {{range .Memberships}}
+    <label class="row" style="gap:.5rem;margin:.25rem 0">
+      <input type="radio" name="household_id" value="{{.HouseholdID}}"{{if .IsDefault}} checked{{end}}{{if $.Single}} disabled{{end}}>
+      {{.Name}}{{if eq .Role "owner"}} <span class="muted small">(owner)</span>{{end}}
+    </label>
+    {{end}}
+    {{if .Single}}
+    <p class="muted small">Disabled while you belong to exactly one household.</p>
+    {{else}}
+    <button type="submit" class="btn-primary">Save</button>
+    {{end}}
+  </form>
+  {{else}}
+  <p class="muted">You belong to no households — <a href="/households/new">create one</a> or <a href="/join-with-code">join with a code</a>.</p>
+  {{end}}
+</div>
+{{end}}

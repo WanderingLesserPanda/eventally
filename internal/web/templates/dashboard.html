@@ -1,4 +1,23 @@
 {{define "page/dashboard"}}
+{{if .Join}}
+<div class="join-modal-backdrop">
+  <div class="join-modal" role="dialog" aria-modal="true">
+    <h2>Join a household?</h2>
+    <p>You used an invite code for <strong>{{.Join.Household}}</strong>
+      {{if .Join.Owner}}(owned by {{.Join.Owner}}){{end}}. Add yourself to it?</p>
+    <form method="post" action="/join/complete" class="row" style="gap:.5rem">
+      {{template "csrf" .}}
+      <input type="hidden" name="token" value="{{.Join.Token}}">
+      <button type="submit" class="btn-primary">Join</button>
+    </form>
+    <form method="post" action="/join/dismiss" class="row" style="gap:.5rem;margin-top:.5rem">
+      {{template "csrf" .}}
+      <input type="hidden" name="token" value="{{.Join.Token}}">
+      <button type="submit" class="btn-link">Don't Join</button>
+    </form>
+  </div>
+</div>
+{{end}}
 <div class="page-head">
   <h1>Dashboard</h1>
 </div>
