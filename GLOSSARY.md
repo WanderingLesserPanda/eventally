@@ -26,6 +26,21 @@ _Avoid_: moderator, manager
 A household participant. May hold household-level and account-level grants;
 by default holds read access only.
 
+**Membership**:
+A user belonging to a household. A user may hold several memberships —
+one username is one person across the whole app.
+_Avoid_: account, profile
+
+**Default household**:
+The household a user lands in at login; settable in Settings, and set
+automatically on joining a household or founding a new one.
+_Avoid_: home household, primary household
+
+**Invite code**:
+A one-time, expiring, single-use credential issued by the owner or an admin
+that grants a user membership in a household.
+_Avoid_: token, invite link
+
 ### Access
 
 **Household-level grant**:
