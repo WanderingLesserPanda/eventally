@@ -55,8 +55,14 @@ split party, or that they paid as settlement payer.
 
 ## Consequences
 
-- Migration drops `can_edit`, `record_scope`, `member_account_scope` and adds
-  the two grant tables (dev data only — clobber, no backfill).
+- Migration 000012 drops `can_edit`, `record_scope`, `member_account_scope`
+  and adds the two grant tables. Backfill (existing rows): the owner gets the
+  full household grant (all modes `all`, admin) and members a read-only one
+  (`created` modes); every member gets a read-only, All-records grant on
+  every existing account. `account.created_by_user_id` and
+  `recurring_template.created_by_user_id` are NULL-able until the app starts
+  populating them. Two-member seed-SQL shapes live in
+  `docs/notes/seed-grants.md`.
 - Enforcement loads both tiers into request context; every read query gains
   a grant filter, every write path checks the grant set of the record's
   accounts. **Q7 (settled 2026-10-21, "anchor rule" — pending live-UI
