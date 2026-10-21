@@ -65,8 +65,8 @@ split party, or that they paid as settlement payer.
   `docs/notes/seed-grants.md`.
 - Enforcement loads both tiers into request context; every read query gains
   a grant filter, every write path checks the grant set of the record's
-  accounts. **Q7 (settled 2026-10-21, "anchor rule" — pending live-UI
-  confirmation):** a settlement's permission surface is its own account +
+  accounts. **Q7 (settled 2026-10-21, "anchor rule" — verified via smoke
+  test + cutover page-walk, 2026-10-21):** a settlement's permission surface is its own account +
   the card family behind its allocated splits; the D6 source asset account
   counts only for create-with-transfer. Read/delete of a settlement never
   requires a grant on the D6 source — the linked transfer is a separate

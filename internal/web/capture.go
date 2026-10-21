@@ -149,6 +149,18 @@ func (a *App) capturePOST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Gate 5: capture posts a charge onto the card — it needs a create
+	// grant on that account.
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
+	if !p.canCreateOn(cardID) {
+		fail("You do not have permission to record on that card.")
+		return
+	}
+
 	// Merchant: one free-text field (D12 UX — a datalist suggests known
 	// names; anything not typed is a new merchant). Names are matched
 	// case-insensitively per household so "makro" and "Makro" are the

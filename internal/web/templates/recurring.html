@@ -24,12 +24,12 @@
       <td>{{orDash .Participants}}</td>
       <td>{{if .LastGenerated}}{{date .LastGenerated}}{{else}}—{{end}}</td>
       <td class="row-actions">
-        <a class="btn small" href="/recurring/{{.ID}}">Edit</a>
-        <form method="post" action="/recurring/{{.ID}}/deactivate" style="display:inline"
+        {{if .CanEdit}}<a class="btn small" href="/recurring/{{.ID}}">Edit</a>{{end}}
+        {{if .CanDelete}}<form method="post" action="/recurring/{{.ID}}/deactivate" style="display:inline"
               onsubmit="return confirm('Stop {{.Name}}? Entries already generated are untouched.')">
           {{template "csrf" $root}}
           <button class="btn btn-danger small">Stop</button>
-        </form>
+        </form>{{end}}
       </td>
     </tr>
     {{end}}

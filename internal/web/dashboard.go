@@ -6,6 +6,7 @@ package web
 // customisation is configuration, not redesign.
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -37,7 +38,13 @@ type dashPersonOut struct {
 // pending-review count, and budget-vs-actual (D10/D15).
 func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	// P7 (D11): catch up recurring templates due this month so the
 	// pending-review count below already includes today's charges.
 	a.generateDueRecurring(ctx, hh, time.Now())
@@ -48,7 +55,10 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// Card 1+5: top-level expense categories, budget roll-up (parent
 	// collects its subtree) and current-month actuals.
 	var cats []dashCatRow
-	rows, err := a.Pool.Query(ctx, `
+	// Gate 5: actuals only count transactions the caller may see. The
+	// fragment spliced via %s uses $1 (household) and $4 (user id — the
+	// 4th bound value after hh, monthStart, monthEnd).
+	rows, err := a.Pool.Query(ctx, fmt.Sprintf(`
 		WITH RECURSIVE tree AS (
 			SELECT id, id AS root_id FROM category
 			WHERE household_id = $1 AND is_active AND parent_id IS NULL
@@ -66,12 +76,15 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		        WHERE a.household_id = $1 AND a.record_status <> 'void'
 		          AND a.class = 'expense'
 		          AND a.transaction_date >= $2 AND a.transaction_date < $3
+		          AND %s
 		          AND a.category_id IN (SELECT t.id FROM tree t
 		                               WHERE t.root_id = tops.id))
 		FROM category tops
 		WHERE tops.household_id = $1 AND tops.is_active
 		  AND tops.parent_id IS NULL AND tops.transaction_class = 'expense'
-		ORDER BY tops.sort_order, tops.name`, hh, monthStart, monthEnd)
+		ORDER BY tops.sort_order, tops.name`,
+		txnVisibleWhereAliased(p, 4, 1, "a")),
+		hh, monthStart, monthEnd, sess.UserID)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -139,12 +152,19 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		rec, err := a.cardRecordedBalance(ctx, hh, fam)
+		// Gate 5 (partial/hidden): the family row is shown only if the
+		// caller can read the family's anchor account; the roll-up then
+		// covers only the members they hold a read grant on.
+		if !p.canReadRecords(s.id) {
+			continue
+		}
+		vis := a.visibleFamily(p, fam)
+		rec, err := a.cardRecordedBalance(ctx, hh, vis)
 		if err != nil {
 			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		out, err := a.cardOutstanding(ctx, hh, fam)
+		out, err := a.cardOutstanding(ctx, hh, vis)
 		if err != nil {
 			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -154,7 +174,7 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// Card 3: outstanding per person across all credit cards.
 	var personOuts []dashPersonOut
-	rows, err = a.Pool.Query(ctx, `
+	rows, err = a.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT COALESCE(p.name, 'Unknown'),
 		       SUM(s.amount - COALESCE(al.a, 0))
 		FROM transaction_split s
@@ -167,9 +187,10 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN (SELECT split_id, SUM(amount) AS a
 			FROM settlement_allocation GROUP BY split_id) al ON al.split_id = s.id
 		WHERE t.household_id = $1 AND t.record_status <> 'void' AND t.class = 'expense'
+		  AND %s
 		GROUP BY 1
 		HAVING SUM(s.amount - COALESCE(al.a, 0)) > 0
-		ORDER BY 2 DESC`, hh)
+		ORDER BY 2 DESC`, txnVisibleWhere(p, 2, 1)), hh, sess.UserID)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -189,11 +210,14 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Card 4: pending review.
+	// Card 4: pending review (only pending records the caller may see).
 	var pending int
-	if err := a.Pool.QueryRow(ctx, `
+	// The txn is unaliased in this query — the visibility fragment must
+	// reference it by its real name, not the default `t` alias.
+	if err := a.Pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT count(*) FROM "transaction"
-		WHERE household_id = $1 AND record_status = 'pending'`, hh).Scan(&pending); err != nil {
+		WHERE household_id = $1 AND record_status = 'pending' AND %s`,
+		txnVisibleWhereAliased(p, 2, 1, "transaction")), hh, sess.UserID).Scan(&pending); err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

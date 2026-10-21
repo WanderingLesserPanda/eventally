@@ -103,7 +103,13 @@ func parseReconMonth(s string) (time.Time, bool) {
 // children are hidden (their statements are the parent's).
 func (a *App) handleReconcile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	nowMonth := time.Now().Format(reconMonthLayout)
 
 	var cards []reconCardRow
@@ -153,13 +159,20 @@ func (a *App) handleReconcile(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// Gate 5 (partial/hidden): a family row is shown only if the
+		// caller can read the family's anchor account; balances roll up
+		// only over the members they hold a read grant on.
+		if !p.canReadRecords(s.id) {
+			continue
+		}
+		vis := a.visibleFamily(p, fam)
 		c := reconCardRow{ID: s.id, Name: s.name, CardType: s.ctype}
-		rec, err := a.cardRecordedBalance(ctx, hh, fam)
+		rec, err := a.cardRecordedBalance(ctx, hh, vis)
 		if err != nil {
 			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		out, err := a.cardOutstanding(ctx, hh, fam)
+		out, err := a.cardOutstanding(ctx, hh, vis)
 		if err != nil {
 			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -213,7 +226,13 @@ func (a *App) cardRecordedAtFamily(ctx context.Context, hh int64, fam []int64, e
 // actual-balance form (prefilled from a saved anchor, if any).
 func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 
 	cardID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -241,6 +260,14 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Gate 5 (anchor rule): the month page needs a read grant on the family
+	// (the statement belongs to it); it renders PARTIALLY over the readable
+	// members and is hidden when none are readable.
+	if !p.canReadCardFamily(fam) {
+		http.Error(w, "You do not have permission to view this card's reconciliation.", http.StatusForbidden)
+		return
+	}
+	fam = a.visibleFamily(p, fam)
 	ph := inPh(fam)
 	mStartPh := "$" + strconv.Itoa(len(fam)+2)
 	mEndPh := "$" + strconv.Itoa(len(fam)+3)
@@ -438,6 +465,11 @@ func (a *App) handleReconcileMonthPost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sess := sessionFromContext(ctx)
 	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	monthParam := chi.URLParam(r, "month")
 
 	cardID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -461,6 +493,17 @@ func (a *App) handleReconcileMonthPost(w http.ResponseWriter, r *http.Request) {
 	fam, _, err := a.cardOperatingFamily(ctx, hh, cardID)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Gate 5: saving a reconciliation (the statement's D8 anchor) is a
+	// family-scope edit — it needs a read grant on the family (anchor rule)
+	// and an edit grant on at least one of its members.
+	if !p.canReadCardFamily(fam) {
+		http.Error(w, "You do not have permission to reconcile this card.", http.StatusForbidden)
+		return
+	}
+	if !p.anyEditOnFamily(fam) {
+		http.Error(w, "You do not have an edit grant on this card family.", http.StatusForbidden)
 		return
 	}
 

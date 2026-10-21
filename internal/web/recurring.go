@@ -39,6 +39,10 @@ type RecurringLine struct {
 	Participants    string // e.g. "tester, Partner" — display only
 	Active          bool
 	LastGenerated   *time.Time
+	AccountID       int64
+	Creator         int64 // 0 = unknown (pre-000012 rows); R5 delete needs a real creator
+	CanDelete       bool
+	CanEdit         bool
 }
 
 // recurringSpec is the validated create/edit form payload.
@@ -79,18 +83,26 @@ func splitSpecKeys(specJSON []byte) []string {
 }
 
 func (a *App) handleRecurring(w http.ResponseWriter, r *http.Request) {
-	hh := sessionFromContext(r.Context()).Household
-	a.generateDueRecurring(r.Context(), hh, time.Now())
+	ctx := r.Context()
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
+	a.generateDueRecurring(ctx, hh, time.Now())
 
-	rows, err := a.Pool.Query(r.Context(), `
+	rows, err := a.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT t.id, t.name, COALESCE(m.name, ''), COALESCE(c.name, ''), a.name,
-		       t.amount, t.day_of_month, t.is_active, t.last_generated_date, t.split_spec
+		       t.amount, t.day_of_month, t.is_active, t.last_generated_date, t.split_spec,
+		       t.account_id, COALESCE(t.created_by_user_id, 0)
 		FROM recurring_template t
 		LEFT JOIN merchant m ON m.id = t.merchant_id
 		LEFT JOIN category c ON c.id = t.category_id
 		JOIN account a ON a.id = t.account_id
-		WHERE t.household_id = $1
-		ORDER BY t.name`, hh)
+		WHERE t.household_id = $1%s
+		ORDER BY t.name`, recurringVisibleWhere(p, 2)), hh, sess.UserID)
 	if err != nil {
 		http.Error(w, "list recurring: "+err.Error(), 500)
 		return
@@ -121,7 +133,8 @@ func (a *App) handleRecurring(w http.ResponseWriter, r *http.Request) {
 		var l RecurringLine
 		var specJSON []byte
 		if err := rows.Scan(&l.ID, &l.Name, &l.Merchant, &l.Category, &l.Account,
-			&l.Amount, &l.DayOfMonth, &l.Active, &l.LastGenerated, &specJSON); err != nil {
+			&l.Amount, &l.DayOfMonth, &l.Active, &l.LastGenerated, &specJSON,
+			&l.AccountID, &l.Creator); err != nil {
 			http.Error(w, "scan recurring: "+err.Error(), 500)
 			return
 		}
@@ -134,6 +147,13 @@ func (a *App) handleRecurring(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		l.Participants = strings.Join(names, ", ")
+		// Per-row actions (Gate 5): editing needs the account's edit grant
+		// (Related mode must also be in the spec); deleting is author-scoped
+		// (R5) — the creator or the owner.
+		inSpec := l.Creator == sess.UserID || isSplitParty(sess.UserID, splitSpecKeys(specJSON))
+		canE, mode := p.canEditRecordMode(l.AccountID)
+		l.CanEdit = canE && (mode == "All" || inSpec)
+		l.CanDelete = p.canDeleteRecurring(l.Creator)
 		list = append(list, l)
 	}
 	a.render(w, r, 200, "recurring.html", map[string]any{
@@ -142,6 +162,31 @@ func (a *App) handleRecurring(w http.ResponseWriter, r *http.Request) {
 		"Section": "recurring",
 		"List":    list,
 	})
+}
+
+// recurringVisibleWhere is the visibility predicate for recurring templates
+// (alias `t`): the creator sees their own, otherwise the template's account
+// must carry a read grant with an All view mode — or a Related view mode and
+// the user is a split party of the template (R5 split-party visibility).
+// $1 = household, $uN = user.
+func recurringVisibleWhere(p *perms, uN int) string {
+	if p.isOwner() {
+		// The owner sees every template. The fragment still consumes the
+		// $uN placeholder (a tautology) so callers can bind their args
+		// uniformly — pgx rejects queries with more bound args than
+		// placeholders.
+		return fmt.Sprintf(" AND ($%d::bigint IS NOT NULL)", uN)
+	}
+	u := fmt.Sprintf("$%d", uN)
+	// JSONB array of "user:N"/"cp:M" strings: a user is a party when any
+	// element equals "user:<id>" (exact match avoids prefix collisions).
+	// The id is concatenated, never embedded in the literal: quoting %s
+	// would bake "$2" into the string and the comparison would never match.
+	exact := fmt.Sprintf(
+		"EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(t.split_spec, '[]'::jsonb)) e(e) WHERE e = 'user:' || %s::text)", u)
+	return fmt.Sprintf(
+		" AND (COALESCE(t.created_by_user_id, 0) = %s OR EXISTS (SELECT 1 FROM account_grant ag WHERE ag.user_id = %s AND ag.household_id = $1 AND ag.can_read AND ag.account_id = t.account_id AND ag.view_mode = 'All') OR (EXISTS (SELECT 1 FROM account_grant ag WHERE ag.user_id = %s AND ag.household_id = $1 AND ag.can_read AND ag.account_id = t.account_id AND ag.view_mode = 'Related') AND %s))",
+		u, u, u, exact)
 }
 
 // recurringForm carries the form state for create + edit.
@@ -289,10 +334,30 @@ func (a *App) handleRecurringEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	f, err := a.recurringFormOptions(ctx, hh)
 	if err != nil {
 		http.Error(w, "load options: "+err.Error(), 500)
+		return
+	}
+	// Gate 5: the edit page is only reachable with an edit grant.
+	accID, _, inSpec, err := a.recurringAccess(ctx, hh, sess.UserID, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "not found", 404)
+		return
+	}
+	if err != nil {
+		http.Error(w, "load recurring: "+err.Error(), 500)
+		return
+	}
+	if !p.canEditRecurring(accID, inSpec) {
+		http.Error(w, "You do not have permission to edit this template.", http.StatusForbidden)
 		return
 	}
 	var (
@@ -329,8 +394,29 @@ func (a *App) handleRecurringEdit(w http.ResponseWriter, r *http.Request) {
 	a.renderRecurringForm(w, r, f)
 }
 
+// recurringAccess loads a template's account id, creator and whether the
+// user is a split party in its spec.
+func (a *App) recurringAccess(ctx context.Context, hh, user, id int64) (accountID, creator int64, inSpec bool, err error) {
+	var specJSON []byte
+	err = a.Pool.QueryRow(ctx, `
+		SELECT t.account_id, COALESCE(t.created_by_user_id, 0), COALESCE(t.split_spec, '[]'::jsonb)
+		FROM recurring_template t WHERE t.id = $1 AND t.household_id = $2`, id, hh).
+		Scan(&accountID, &creator, &specJSON)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	inSpec = creator == user || isSplitParty(user, splitSpecKeys(specJSON))
+	return accountID, creator, inSpec, nil
+}
+
 func (a *App) saveRecurring(w http.ResponseWriter, r *http.Request, hh, id int64) {
 	ctx := r.Context()
+	sess := sessionFromContext(ctx)
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	f, err := a.recurringFormOptions(ctx, hh)
 	if err != nil {
 		http.Error(w, "load options: "+err.Error(), 500)
@@ -414,6 +500,37 @@ func (a *App) saveRecurring(w http.ResponseWriter, r *http.Request, hh, id int64
 		return
 	}
 
+	// Gate 5 write checks.
+	if id == 0 {
+		if !p.canCreateRecurring(f.AccountID) {
+			f.Err = "You do not have permission to create a template on that account."
+			a.renderRecurringForm(w, r, f)
+			return
+		}
+	} else {
+		accID, _, inSpec, err := a.recurringAccess(ctx, hh, sess.UserID, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "not found", 404)
+			return
+		}
+		if err != nil {
+			http.Error(w, "load recurring: "+err.Error(), 500)
+			return
+		}
+		if !p.canEditRecurring(accID, inSpec) {
+			f.Err = "You do not have permission to edit this template."
+			a.renderRecurringForm(w, r, f)
+			return
+		}
+		// Moving the template to another account also needs a write grant
+		// on the new account.
+		if f.AccountID != accID && !p.canEditRecurring(f.AccountID, inSpec) {
+			f.Err = "You do not have permission to move this template to that account."
+			a.renderRecurringForm(w, r, f)
+			return
+		}
+	}
+
 	var merch, cat any
 	if f.MerchantID > 0 {
 		merch = f.MerchantID
@@ -431,10 +548,10 @@ func (a *App) saveRecurring(w http.ResponseWriter, r *http.Request, hh, id int64
 		_, err = a.Pool.Exec(ctx, `
 			INSERT INTO recurring_template
 				(household_id, name, merchant_id, category_id, account_id,
-				 amount, day_of_month, split_spec, is_active)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+				 amount, day_of_month, split_spec, is_active, created_by_user_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
 			hh, f.Name, merch, cat, f.AccountID, amount, day,
-			specJSON, f.Active)
+			specJSON, f.Active, sess.UserID)
 		if err != nil {
 			if isUniqueViolation(err) {
 				f.Err = "A recurring template with this name already exists."
@@ -483,8 +600,30 @@ func (a *App) handleRecurringDeactivate(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "bad id", 400)
 		return
 	}
-	hh := sessionFromContext(r.Context()).Household
-	res, err := a.Pool.Exec(r.Context(),
+	ctx := r.Context()
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
+	// R5: deactivating a template is an author-scoped action (creator or
+	// owner). A split party can see/edit it but not stop it.
+	_, creator, _, err := a.recurringAccess(ctx, hh, sess.UserID, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "not found", 404)
+		return
+	}
+	if err != nil {
+		http.Error(w, "load recurring: "+err.Error(), 500)
+		return
+	}
+	if !p.canDeleteRecurring(creator) {
+		http.Error(w, "Only the template's creator can stop it.", http.StatusForbidden)
+		return
+	}
+	res, err := a.Pool.Exec(ctx,
 		`UPDATE recurring_template SET is_active = false WHERE id = $1 AND household_id = $2`,
 		id, hh)
 	if err != nil {
@@ -682,10 +821,17 @@ func (a *App) generateRecurringEntry(ctx context.Context, hh int64, d dueTemplat
 // handleReview lists pending transactions — the monthly review surface
 // (D9: entries get approved when the statement check happens).
 func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
-	hh := sessionFromContext(r.Context()).Household
-	a.generateDueRecurring(r.Context(), hh, time.Now())
+	ctx := r.Context()
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
+	a.generateDueRecurring(ctx, hh, time.Now())
 
-	rows, err := a.Pool.Query(r.Context(), `
+	rows, err := a.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT t.id, t.transaction_date, COALESCE(t.description,
 		       COALESCE(m.name, 'transaction')),
 		       COALESCE(c.name, ''), t.total_amount,
@@ -696,7 +842,8 @@ func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN category c ON c.id = t.category_id
 		LEFT JOIN app_user u ON u.id = t.recorded_by_user_id
 		WHERE t.household_id = $1 AND t.record_status = 'pending'
-		ORDER BY t.transaction_date DESC, t.id DESC`, hh)
+		  AND %s
+		ORDER BY t.transaction_date DESC, t.id DESC`, txnVisibleWhere(p, 2, 1)), hh, sess.UserID)
 	if err != nil {
 		http.Error(w, "list pending: "+err.Error(), 500)
 		return
@@ -735,7 +882,13 @@ func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
 // force-changed.
 func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	target := r.FormValue("status")
 	if !inSlice(target, txnStatuses) {
 		http.Error(w, "bad status", 400)
@@ -774,11 +927,24 @@ func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	// Only pending rows may change status here (the queue is pending-only).
+	// Only pending rows may change status here (the queue is pending-only),
+	// and only ones the caller holds an Edit grant on (Gate 5: a status move
+	// is an edit). Denied rows are skipped and counted.
+	denied := 0
 	var ok []int64
 	for _, id := range ids {
-		if !locked[id] {
+		if locked[id] {
+			continue
+		}
+		surface, inRel, err := a.txnAccess(ctx, hh, sess.UserID, id)
+		if err != nil {
+			http.Error(w, "load access: "+err.Error(), 500)
+			return
+		}
+		if p.canEditTxn(surface, inRel) {
 			ok = append(ok, id)
+		} else {
+			denied++
 		}
 	}
 	var n int64
@@ -800,6 +966,9 @@ func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("%d of %d selected transactions %s.", n, len(ids), verb)
 	if len(locked) > 0 {
 		msg += fmt.Sprintf(" %d skipped — a payment references their splits.", len(locked))
+	}
+	if denied > 0 {
+		msg += fmt.Sprintf(" %d skipped — no edit permission.", denied)
 	}
 	a.redirectReview(w, r, msg)
 }

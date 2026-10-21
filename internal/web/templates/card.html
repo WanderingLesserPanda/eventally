@@ -41,10 +41,10 @@
       <tr><td><strong>{{.C.Name}}</strong> (total)</td><td></td>
         <td class="money"><strong>{{money .C.Family.TotalOut}}</strong></td>
         <td class="money"><strong>{{money .C.Family.TotalRec}}</strong></td></tr>
-      {{range .C.Family.Children}}
+      {{range .C.Family.Children}}{{if not .Hidden}}
       <tr><td><a href="/cards/{{.ID}}">{{.Name}}</a></td><td>{{.CardType}}</td>
         <td class="money">{{money .Outstanding}}</td><td class="money">{{money .Recorded}}</td></tr>
-      {{end}}
+      {{end}}{{end}}
     </tbody>
   </table>
   {{else}}

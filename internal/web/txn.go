@@ -44,6 +44,17 @@ var (
 
 // --- shared option lists ----------------------------------------------------
 
+// acctGrantFilter is the SQL fragment appended to account option queries to
+// restrict them to accounts the caller has a read grant on. Owner: "" (all).
+// The fragment correlates on $uN (user id) and $hN (household id).
+func acctGrantFilter(p *perms, uN, hN int) string {
+	if p == nil || p.isOwner() {
+		return ""
+	}
+	return fmt.Sprintf(
+		"AND EXISTS (SELECT 1 FROM account_grant ag WHERE ag.user_id = $%d AND ag.household_id = $%d AND ag.can_read AND ag.account_id = account.id)", uN, hN)
+}
+
 type opt struct {
 	ID     int64
 	Name   string
@@ -652,14 +663,38 @@ func (a *App) validateRefs(ctx context.Context, hh int64, s *txnspec) error {
 
 func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 	sess := sessionFromContext(r.Context())
-	spec, f, perr := parseTxnForm(r)
-	if perr != "" {
-		a.reRenderForm(w, r, hh, id, f, perr)
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
+	spec, f, parseErr := parseTxnForm(r)
+	if parseErr != "" {
+		a.reRenderForm(w, r, hh, id, f, parseErr)
 		return
 	}
 	if err := a.validateRefs(r.Context(), hh, spec); err != nil {
 		a.reRenderForm(w, r, hh, id, f, err.Error())
 		return
+	}
+
+	// Gate 5 write check: the new/edited surface must be fully granted.
+	surface := txnWriteSurface(spec.originType, spec.originRef, spec.destType, spec.destRef)
+	if id == 0 {
+		if !p.canCreateTxn(surface) {
+			http.Error(w, "You do not have permission to record a transaction on the chosen account(s).", http.StatusForbidden)
+			return
+		}
+	} else {
+		_, inRelated, err := a.txnAccess(r.Context(), hh, sess.UserID, id)
+		if err != nil {
+			http.Error(w, "load access: "+err.Error(), 500)
+			return
+		}
+		if !p.canEditTxn(surface, inRelated) {
+			http.Error(w, "You do not have permission to edit this transaction.", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Guard: once a settlement has allocated against this transaction's
@@ -847,7 +882,13 @@ type listFilters struct {
 
 func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, err := a.permFor(r)
+	if err != nil {
+		http.Error(w, "permission load: "+err.Error(), 500)
+		return
+	}
 	q := r.URL.Query()
 	f := listFilters{
 		From:   q.Get("from"),
@@ -863,12 +904,15 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 		f.AccountID, _ = strconv.ParseInt(s, 10, 64)
 	}
 
+	// $1 = household, $2 = user id (the visibility fragment correlates on both).
 	conds := []string{"t.household_id = $1"}
-	args := []any{hh}
+	args := []any{hh, sess.UserID}
 	addCond := func(sql string, arg any) {
 		args = append(args, arg)
 		conds = append(conds, fmt.Sprintf(sql, len(args)))
 	}
+	// Gate 5 visibility: account-grant surface + Related/All view mode.
+	conds = append(conds, txnVisibleWhere(p, 2, 1))
 	if f.From != "" && isDateStr(f.From) {
 		addCond("t.transaction_date >= $%d", f.From)
 	}
@@ -1036,7 +1080,28 @@ func (a *App) handleTxnEdit(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	f, err := a.loadTxnForm(r.Context(), sessionFromContext(r.Context()).Household, id)
+	ctx := r.Context()
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, err := a.permFor(r)
+	if err != nil {
+		http.Error(w, "permission load: "+err.Error(), 500)
+		return
+	}
+	surface, inRelated, err := a.txnAccess(ctx, hh, sess.UserID, id)
+	if err != nil {
+		http.Error(w, "load access: "+err.Error(), 500)
+		return
+	}
+	if !p.canSeeTxn(surface, inRelated) {
+		http.Error(w, "You do not have permission to view this transaction.", http.StatusForbidden)
+		return
+	}
+	if !p.canEditTxn(surface, inRelated) {
+		http.Error(w, "You do not have permission to edit this transaction.", http.StatusForbidden)
+		return
+	}
+	f, err := a.loadTxnForm(ctx, hh, id)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -1102,7 +1167,13 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, err := a.permFor(r)
+	if err != nil {
+		http.Error(w, "permission load: "+err.Error(), 500)
+		return
+	}
 
 	var t txnDetail
 	var (
@@ -1111,7 +1182,7 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 		orig, rate   float64
 		merch, cat   string
 	)
-	err := a.Pool.QueryRow(ctx, `
+	err = a.Pool.QueryRow(ctx, `
 		SELECT t.id, t.transaction_date, t.class, t.description, t.notes,
 		       t.total_amount, t.record_status, t.source,
 		       COALESCE(u.display_name, ''),
@@ -1137,6 +1208,16 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 			&merch, &cat)
 	if err != nil {
 		http.NotFound(w, r)
+		return
+	}
+	// Gate 5 visibility: the user may only open a record they can see.
+	surface, inRelated, err := a.txnAccess(ctx, hh, sess.UserID, id)
+	if err != nil {
+		http.Error(w, "load access: "+err.Error(), 500)
+		return
+	}
+	if !p.canSeeTxn(surface, inRelated) {
+		http.Error(w, "You do not have permission to view this transaction.", http.StatusForbidden)
 		return
 	}
 	t.Merchant, t.Category = merch, cat
@@ -1223,14 +1304,29 @@ func (a *App) handleTxnStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	target := r.FormValue("status")
 	if !inSlice(target, txnStatuses) {
 		http.Error(w, "bad status", 400)
 		return
 	}
+	surface, inRelated, err := a.txnAccess(ctx, hh, sess.UserID, id)
+	if err != nil {
+		http.Error(w, "load access: "+err.Error(), 500)
+		return
+	}
+	if !p.canSeeTxn(surface, inRelated) {
+		http.Error(w, "You do not have permission to view this transaction.", http.StatusForbidden)
+		return
+	}
 	var cur string
-	err := a.Pool.QueryRow(ctx,
+	err = a.Pool.QueryRow(ctx,
 		`SELECT record_status FROM "transaction" WHERE id = $1 AND household_id = $2`,
 		id, hh).Scan(&cur)
 	if err != nil {
@@ -1240,6 +1336,11 @@ func (a *App) handleTxnStatus(w http.ResponseWriter, r *http.Request) {
 	if cur == "void" {
 		http.Redirect(w, r, fmt.Sprintf("/txns/%d?msg=%s", id,
 			url.QueryEscape("A voided transaction cannot be changed.")), http.StatusSeeOther)
+		return
+	}
+	// Status moves follow the Edit grant (D27).
+	if !p.canEditTxn(surface, inRelated) {
+		http.Error(w, "You do not have permission to change this transaction's status.", http.StatusForbidden)
 		return
 	}
 	if target != "void" {
@@ -1308,12 +1409,29 @@ func (a *App) handleTxnReceiptUpload(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	hh := sessionFromContext(r.Context()).Household
+	ctx := r.Context()
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	// Confirm the transaction exists first (404 before parsing the body).
 	var n int
-	if err := a.Pool.QueryRow(r.Context(),
+	if err := a.Pool.QueryRow(ctx,
 		`SELECT count(*) FROM "transaction" WHERE id = $1 AND household_id = $2`, id, hh).Scan(&n); err != nil || n == 0 {
 		http.NotFound(w, r)
+		return
+	}
+	// Attaching a receipt is an edit of the record (D27).
+	surface, inRel, err := a.txnAccess(ctx, hh, sess.UserID, id)
+	if err != nil {
+		http.Error(w, "load access: "+err.Error(), 500)
+		return
+	}
+	if !p.canEditTxn(surface, inRel) {
+		http.Error(w, "You do not have permission to edit this transaction.", http.StatusForbidden)
 		return
 	}
 	if err := r.ParseMultipartForm(11 << 20); err != nil {
@@ -1374,13 +1492,30 @@ func (a *App) handleTxnReceiptDelete(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	hh := sessionFromContext(r.Context()).Household
+	ctx := r.Context()
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	var rp string
-	err := a.Pool.QueryRow(r.Context(),
+	err := a.Pool.QueryRow(ctx,
 		`SELECT COALESCE(receipt_path, '') FROM "transaction" WHERE id = $1 AND household_id = $2`,
 		id, hh).Scan(&rp)
 	if err != nil {
 		http.NotFound(w, r)
+		return
+	}
+	// Removing a receipt is an edit of the record (D27).
+	surface, inRel, err := a.txnAccess(ctx, hh, sess.UserID, id)
+	if err != nil {
+		http.Error(w, "load access: "+err.Error(), 500)
+		return
+	}
+	if !p.canEditTxn(surface, inRel) {
+		http.Error(w, "You do not have permission to edit this transaction.", http.StatusForbidden)
 		return
 	}
 	if rp != "" {
@@ -1405,6 +1540,33 @@ func (a *App) serveReceipts(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, "/receipts/")
 	if p == "" || strings.Contains(p, "..") || strings.Contains(p, "/") {
 		http.NotFound(w, r)
+		return
+	}
+	ctx := r.Context()
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	pg, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
+	// A receipt belongs to a transaction: only serve it if the caller may
+	// see that record (Gate 5). Unclaimed receipts are not served.
+	var txnID int64
+	err := a.Pool.QueryRow(ctx,
+		`SELECT id FROM "transaction"
+		 WHERE household_id = $1 AND receipt_path = $2`, hh, p).Scan(&txnID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	surface, inRel, err := a.txnAccess(ctx, hh, sess.UserID, txnID)
+	if err != nil {
+		http.Error(w, "load access: "+err.Error(), 500)
+		return
+	}
+	if !pg.canSeeTxn(surface, inRel) {
+		http.Error(w, "You do not have permission to view this receipt.", http.StatusForbidden)
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(p))

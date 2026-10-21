@@ -162,6 +162,7 @@ type cardFamilyLine struct {
 	CardType    string
 	Outstanding money.Money
 	Recorded    money.Money
+	Hidden      bool // Gate 5: no read grant on this member — not rendered
 }
 
 // cardFamily is the one-level parent/child family of a card (D19): the
@@ -569,8 +570,13 @@ func (a *App) cardListFamily(ctx context.Context, hh, id int64) ([]int64, int, e
 
 func (a *App) handleCards(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
-
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	// One row per family (D19): cards with parent_id NULL are either
 	// standalones (aggregate self) or parents (roll up active children).
 	// Children are hidden from the list; they show under the parent page.
@@ -593,18 +599,24 @@ func (a *App) handleCards(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "scan card: "+err.Error(), 500)
 			return
 		}
-		fam, nKids, err := a.cardListFamily(ctx, hh, c.ID)
+		fam, _, err := a.cardListFamily(ctx, hh, c.ID)
 		if err != nil {
 			http.Error(w, "load card family: "+err.Error(), 500)
 			return
 		}
-		c.ChildrenCount = nKids
-		out, err := a.cardOutstanding(ctx, hh, fam)
+		// Gate 5 (anchor rule): a family with no readable member is hidden.
+		if !p.canReadCardFamily(fam) {
+			continue
+		}
+		// Partial view: roll-up covers only the readable members.
+		vis := a.visibleFamily(p, fam)
+		c.ChildrenCount = len(vis)
+		out, err := a.cardOutstanding(ctx, hh, vis)
 		if err != nil {
 			http.Error(w, "card outstanding: "+err.Error(), 500)
 			return
 		}
-		bal, err := a.cardRecordedBalance(ctx, hh, fam)
+		bal, err := a.cardRecordedBalance(ctx, hh, vis)
 		if err != nil {
 			http.Error(w, "card balance: "+err.Error(), 500)
 			return
@@ -626,8 +638,13 @@ func (a *App) handleCardDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
-
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 	_, name, inst, ctype, limit, err := a.cardAccountRow(ctx, hh, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
@@ -651,6 +668,14 @@ func (a *App) handleCardDetail(w http.ResponseWriter, r *http.Request) {
 	} else {
 		fam = []int64{id}
 	}
+	// Gate 5 (anchor rule): a family with no readable member is not openable.
+	if !p.canReadCardFamily(fam) {
+		http.Error(w, "You do not have permission to view this card.", http.StatusForbidden)
+		return
+	}
+	// Partial view: page sections render only over the members the caller has
+	// a read grant on (ADR-0001 "partial/hidden").
+	fam = a.visibleFamily(p, fam)
 	out, err := a.cardOutstanding(ctx, hh, fam)
 	if err != nil {
 		http.Error(w, "card outstanding: "+err.Error(), 500)
@@ -664,6 +689,10 @@ func (a *App) handleCardDetail(w http.ResponseWriter, r *http.Request) {
 	if famView.IsParent {
 		famView.TotalOut, famView.TotalRec = out, bal
 		for i := range famView.Children {
+			if !p.canReadRecords(famView.Children[i].ID) {
+				famView.Children[i].Hidden = true
+				continue
+			}
 			// Each child row shows its own self-scope numbers (a parent
 			// can't roll up inside another roll-up).
 			cout, err := a.cardOutstanding(ctx, hh, []int64{famView.Children[i].ID})
@@ -723,8 +752,13 @@ func (a *App) handleCardPayGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
 	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 
 	_, name, inst, ctype, limit, err := a.cardAccountRow(ctx, hh, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -740,6 +774,11 @@ func (a *App) handleCardPayGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load card family: "+err.Error(), 500)
 		return
 	}
+	if !p.canReadCardFamily(fam) {
+		http.Error(w, "You do not have permission to view this card.", http.StatusForbidden)
+		return
+	}
+	fam = a.visibleFamily(p, fam)
 	all, err := a.cardUnpaidLines(ctx, hh, fam)
 	if err != nil {
 		http.Error(w, "card unpaid: "+err.Error(), 500)
@@ -832,7 +871,13 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 
 	_, name, inst, _, _, err := a.cardAccountRow(ctx, hh, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -848,7 +893,14 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load card family: "+err.Error(), 500)
 		return
 	}
-	all, err := a.cardUnpaidLines(ctx, hh, fam)
+	if !p.canReadCardFamily(fam) {
+		http.Error(w, "You do not have permission to view this card.", http.StatusForbidden)
+		return
+	}
+	// Partial view: only readable members' lines are re-rendered; the
+	// write check below still runs over the FULL family.
+	vis := a.visibleFamily(p, fam)
+	all, err := a.cardUnpaidLines(ctx, hh, vis)
 	if err != nil {
 		http.Error(w, "card unpaid: "+err.Error(), 500)
 		return
@@ -1017,6 +1069,26 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Gate 5 write check (anchor rule + D6): the settlement's surface is the
+	// card family, plus the source account when a ledger transfer is
+	// written. The payer's own accounts are irrelevant.
+	if !p.canCreateSettlement(settlementCreateSurface(fam, ledger, sourceID)) {
+		if ledger {
+			f.Err = "You do not have permission to record a payment on this card (or its source account)."
+		} else {
+			f.Err = "You do not have permission to record a payment on this card."
+		}
+	}
+	if f.Err != "" {
+		f.Users, _ = a.userOptions(ctx, hh)
+		f.Sources, _ = a.assetAccountOptions(ctx, hh)
+		a.render(w, r, http.StatusOK, "card_pay.html", map[string]any{
+			"Title": "Record payment — " + name,
+			"F":     f,
+		})
+		return
+	}
+
 	// Commit: payment + allocations (+ optional D6 transfer) in one tx.
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
@@ -1094,7 +1166,13 @@ func (a *App) handleSettlementDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, perr := a.permFor(r)
+	if perr != nil {
+		http.Error(w, "permission load: "+perr.Error(), 500)
+		return
+	}
 
 	var cardID int64
 	err := a.Pool.QueryRow(ctx,
@@ -1107,6 +1185,38 @@ func (a *App) handleSettlementDelete(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "load payment: "+err.Error(), 500)
 		return
+	}
+
+	// Gate 5 (anchor rule): the settlement's surface is its own account + the
+	// card family behind its allocated splits. Read/delete never require the
+	// D6 source account (the linked transfer is a separate record).
+	var fam []int64
+	if cardID > 0 {
+		fam, err = a.cardFamilyIDs(ctx, hh, cardID)
+		if err != nil {
+			http.Error(w, "load card family: "+err.Error(), 500)
+			return
+		}
+	}
+	if len(fam) > 0 && !p.canReadCardFamily(fam) {
+		http.Error(w, "You do not have permission to view this payment.", http.StatusForbidden)
+		return
+	}
+	if len(fam) > 0 && !p.canDeleteSettlementFamily(fam) {
+		http.Error(w, "You do not have permission to delete this payment.", http.StatusForbidden)
+		return
+	}
+	// Related delete mode: only if the user is in the settlement's slice.
+	if len(fam) > 0 && !p.canAllDeleteOnFamily(fam) {
+		see, err := a.canSeeSettlement(ctx, p, id)
+		if err != nil {
+			http.Error(w, "check access: "+err.Error(), 500)
+			return
+		}
+		if !see {
+			http.Error(w, "You do not have permission to delete this payment.", http.StatusForbidden)
+			return
+		}
 	}
 	if _, err := a.Pool.Exec(ctx, `DELETE FROM settlement WHERE id = $1 AND household_id = $2`,
 		id, hh); err != nil {

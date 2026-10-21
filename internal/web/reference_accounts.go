@@ -90,6 +90,7 @@ type Account struct {
 	Notes        string
 	ParentID     int64
 	ParentName   string
+	CreatedBy    int64 // created_by_user_id (household-level created-mode checks, R5)
 }
 
 // accountListRow is one card in the accounts grid: the stored account
@@ -118,7 +119,7 @@ const accountSelect = `a.id, a.name, a.institution, a.account_type, a.balance_ty
 	COALESCE(a.statement_day, 0), a.statement_day IS NOT NULL,
 	COALESCE(a.payment_due_day, 0), a.payment_due_day IS NOT NULL,
 	a.opening_balance, COALESCE(to_char(a.opening_balance_date, 'YYYY-MM-DD'), ''), a.is_active, a.notes,
-	COALESCE(a.parent_id, 0), COALESCE(pn.name, '')`
+	COALESCE(a.parent_id, 0), COALESCE(pn.name, ''), COALESCE(a.created_by_user_id, 0)`
 
 const accountFrom = `FROM account a
 	LEFT JOIN account pn ON pn.id = a.parent_id`
@@ -148,9 +149,26 @@ func (a *App) accountLiveBalance(ctx context.Context, hh int64, ids []int64) (mo
 
 func (a *App) listAccounts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, err := a.permFor(r)
+	if err != nil {
+		http.Error(w, "permission load: "+err.Error(), 500)
+		return
+	}
+	if !permCanHRead(p) {
+		http.Error(w, "You do not have permission to view accounts.", http.StatusForbidden)
+		return
+	}
+	// Read-filter (Q8: the account grant is the only key): members see the
+	// account objects they have a read grant on; the owner sees everything.
 	rows, err := a.Pool.Query(ctx,
-		fmt.Sprintf(`SELECT %s %s WHERE a.household_id = $1 ORDER BY a.is_active DESC, a.sort_order, a.name`, accountSelect, accountFrom), hh)
+		fmt.Sprintf(`SELECT %s %s WHERE a.household_id = $1
+		 AND ($3 OR EXISTS (SELECT 1 FROM account_grant ag
+		                   WHERE ag.user_id = $2 AND ag.household_id = $1
+		                     AND ag.can_read AND ag.account_id = a.id))
+		 ORDER BY a.is_active DESC, a.sort_order, a.name`, accountSelect, accountFrom),
+		hh, sess.UserID, p.isOwner())
 	if err != nil {
 		http.Error(w, "list accounts: "+err.Error(), 500)
 		return
@@ -164,7 +182,7 @@ func (a *App) listAccounts(w http.ResponseWriter, r *http.Request) {
 			&r.StatementDay, &r.HasStmtDay,
 			&r.PaymentDue, &r.HasPayDue,
 			&r.Opening, &r.OpeningDate, &r.Active, &r.Notes,
-			&r.ParentID, &r.ParentName); err != nil {
+			&r.ParentID, &r.ParentName, &r.CreatedBy); err != nil {
 			http.Error(w, "scan account: "+err.Error(), 500)
 			return
 		}
@@ -381,15 +399,26 @@ func (a *App) handleAccountCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hh := sessionFromContext(r.Context()).Household
+	sess := sessionFromContext(r.Context())
+	p, err := a.permFor(r)
+	if err != nil {
+		http.Error(w, "permission load: "+err.Error(), 500)
+		return
+	}
+	if !p.canCreateAccount() {
+		http.Error(w, "You do not have permission to create accounts.", http.StatusForbidden)
+		return
+	}
 	var id int64
-	err := a.Pool.QueryRow(r.Context(),
+	err = a.Pool.QueryRow(r.Context(),
 		`INSERT INTO account (household_id, name, institution, account_type, balance_type,
 		 card_type, credit_limit, statement_day, payment_due_day,
-		 opening_balance, opening_balance_date, is_active, notes, parent_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+		 opening_balance, opening_balance_date, is_active, notes, parent_id,
+		 created_by_user_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
 		hh, f.Name, f.Institution, f.Type, f.BalanceType,
 		f.cardOrNil(), f.creditLimitOrNil(), f.stmtDayOrNil(), f.payDueOrNil(),
-		f.Opening, f.openingDateOrNil(), true, f.Notes, f.parentOrNil()).Scan(&id)
+		f.Opening, f.openingDateOrNil(), true, f.Notes, f.parentOrNil(), sess.UserID).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "An account with this name already exists."
@@ -410,22 +439,36 @@ func (a *App) handleAccountEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, err := a.permFor(r)
+	if err != nil {
+		http.Error(w, "permission load: "+err.Error(), 500)
+		return
+	}
 	var cur Account
-	err := a.Pool.QueryRow(ctx,
+	err = a.Pool.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s %s WHERE a.id = $2 AND a.household_id = $1`, accountSelect, accountFrom), hh, id).
 		Scan(&cur.ID, &cur.Name, &cur.Institution, &cur.Type, &cur.BalanceType,
 			&cur.CardType, &cur.CreditLimit, &cur.HasCreditLim,
 			&cur.StatementDay, &cur.HasStmtDay,
 			&cur.PaymentDue, &cur.HasPayDue,
 			&cur.Opening, &cur.OpeningDate, &cur.Active, &cur.Notes,
-			&cur.ParentID, &cur.ParentName)
+			&cur.ParentID, &cur.ParentName, &cur.CreatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.Error(w, "not found", 404)
 		return
 	}
 	if err != nil {
 		http.Error(w, "load account: "+err.Error(), 500)
+		return
+	}
+	if !p.canReadRecords(cur.ID) {
+		http.Error(w, "You do not have permission to view this account.", http.StatusForbidden)
+		return
+	}
+	if r.Method == http.MethodPost && !p.canEditAccountObject(cur.ID, cur.CreatedBy) {
+		http.Error(w, "You do not have permission to edit this account.", http.StatusForbidden)
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -462,6 +505,10 @@ func (a *App) handleAccountEdit(w http.ResponseWriter, r *http.Request) {
 	a.redirectRef(w, r, "/accounts", "Account saved.")
 }
 
+// handleAccountDelete is the STRICT delete (Q4): an account is only removable
+// when it has zero tied records (no non-void transactions, no settlements, no
+// child cards). It requires the household-level delete grant scoped by the
+// created|all mode. (Archive is a parked future enhancement — this is not it.)
 func (a *App) handleAccountDelete(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
@@ -469,13 +516,46 @@ func (a *App) handleAccountDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hh := sessionFromContext(ctx).Household
-	if _, err := a.Pool.Exec(ctx,
-		`UPDATE account SET is_active = false WHERE id = $1 AND household_id = $2`, id, hh); err != nil {
-		http.Error(w, "deactivate account: "+err.Error(), 500)
+	sess := sessionFromContext(ctx)
+	hh := sess.Household
+	p, err := a.permFor(r)
+	if err != nil {
+		http.Error(w, "permission load: "+err.Error(), 500)
 		return
 	}
-	a.redirectRef(w, r, "/accounts", "Account deactivated — history keeps its reference.")
+	var createdBy int64
+	err = a.Pool.QueryRow(ctx,
+		`SELECT COALESCE(created_by_user_id, 0) FROM account
+		 WHERE id = $1 AND household_id = $2`, id, hh).Scan(&createdBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "not found", 404)
+		return
+	}
+	if err != nil {
+		http.Error(w, "load account: "+err.Error(), 500)
+		return
+	}
+	if !p.canDeleteAccountObject(id, createdBy) {
+		http.Error(w, "You do not have permission to delete this account.", http.StatusForbidden)
+		return
+	}
+	// Strict rule: refuse if any ledger record still ties to the account.
+	tied, err := a.strictAccountHasTiedRecords(ctx, hh, id)
+	if err != nil {
+		http.Error(w, "check tied records: "+err.Error(), 500)
+		return
+	}
+	if tied {
+		http.Error(w, "This account still has records tied to it (transactions, "+
+			"settlements, or linked card). Remove or move them first — an "+
+			"account with history cannot be deleted.", http.StatusBadRequest)
+		return
+	}
+	if _, err := a.Pool.Exec(ctx, `DELETE FROM account WHERE id = $1 AND household_id = $2`, id, hh); err != nil {
+		http.Error(w, "delete account: "+err.Error(), 500)
+		return
+	}
+	a.redirectRef(w, r, "/accounts", "Account deleted.")
 }
 
 // AccountForm nullable-field helpers.
