@@ -41,13 +41,25 @@ func testPool(t *testing.T, dsn string) *pgxpool.Pool {
 	if err != nil {
 		t.Fatalf("open admin: %v", err)
 	}
-	defer admin.Close()
 	dbname := "eventally_test_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	if _, err := admin.ExecContext(context.Background(), "CREATE DATABASE "+dbname); err != nil {
+		_ = admin.Close()
 		t.Fatalf("create test db: %v", err)
 	}
+	// admin must outlive the test (the drop runs in Cleanup); note the
+	// LIFO order — the pool.Close registered below runs before this drop.
 	t.Cleanup(func() {
-		admin.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+dbname)
+		ctx := context.Background()
+		// Kill lingering connections, then drop (a couple of retries).
+		for attempt := 0; attempt < 5; attempt++ {
+			_, _ = admin.ExecContext(ctx,
+				`SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+				 WHERE datname = $1 AND pid <> pg_backend_pid()`, dbname)
+			if _, err := admin.ExecContext(ctx, "DROP DATABASE IF EXISTS "+dbname); err == nil {
+				break
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
 		_ = admin.Close()
 	})
 	cc, err := pgxpool.ParseConfig(dsn)
