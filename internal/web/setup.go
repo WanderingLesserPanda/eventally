@@ -141,7 +141,7 @@ func (a *App) handleFirstRunPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO app_user (household_id, username, display_name, email, password_hash)
+		`INSERT INTO app_user (default_household_id, username, display_name, email, password_hash)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 		hh, f.Username, f.DisplayName, f.Email, hash).Scan(&userID); err != nil {
 		if isUniqueViolation(err) {
@@ -155,13 +155,24 @@ func (a *App) handleFirstRunPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	// Multi-household membership (000006): the founding user is the
-	// household's owner. user.household_id stays set as the legacy
-	// primary-household pointer (login, email uniqueness).
+	// Multi-household membership: the founding user is the household's
+	// owner. default_household_id points at it (the login-landing).
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO household_member (user_id, household_id, role)
 		 VALUES ($1, $2, 'owner')`, userID, hh); err != nil {
 		log.Printf("first-run membership insert: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	// Owner grant row matching the 000012 backfill's owner shape (the code
+	// path treats the owner as implicit full; the row lets the grants UI
+	// render the owner row locked).
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO household_grant (user_id, household_id, can_read, can_create,
+		    can_edit, can_delete, edit_mode, delete_mode, is_admin)
+		 VALUES ($1, $2, TRUE, TRUE, TRUE, TRUE, 'all', 'all', TRUE)`,
+		userID, hh); err != nil {
+		log.Printf("first-run owner grant insert: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

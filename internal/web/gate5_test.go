@@ -36,7 +36,7 @@ func g5Fixture(t *testing.T, pool *pgxpool.Pool) (a *App, hh, owner, member, mem
 	mkUser := func(username, role string) int64 {
 		var u int64
 		if err := pool.QueryRow(ctx,
-			`INSERT INTO app_user (household_id, username, password_hash, display_name)
+			`INSERT INTO app_user (default_household_id, username, password_hash, display_name)
 			 VALUES ($1,$2,'x',$2) RETURNING id`, hh, username).Scan(&u); err != nil {
 			t.Fatalf("user %s: %v", username, err)
 		}

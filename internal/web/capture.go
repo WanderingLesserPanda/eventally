@@ -202,8 +202,15 @@ func (a *App) capturePOST(w http.ResponseWriter, r *http.Request) {
 			table = `app_user`
 		}
 		var n int
+		var q string
+		if table == `app_user` {
+			// D28: household membership lives in household_member.
+			q = `SELECT count(*) FROM household_member WHERE user_id = $1 AND household_id = $2`
+		} else {
+			q = fmt.Sprintf(`SELECT count(*) FROM %s WHERE id = $1 AND household_id = $2`, table)
+		}
 		if err := a.Pool.QueryRow(ctx,
-			fmt.Sprintf(`SELECT count(*) FROM %s WHERE id = $1 AND household_id = $2`, table),
+			q,
 			id, hh).Scan(&n); err != nil || n == 0 {
 			fail("A participant is not valid for this household.")
 			return
@@ -283,7 +290,10 @@ func (a *App) capturePOST(w http.ResponseWriter, r *http.Request) {
 func (a *App) loadUsers(ctx context.Context, hh int64) ([]opt, error) {
 	var users []opt
 	rows, err := a.Pool.Query(ctx,
-		`SELECT id, display_name FROM app_user WHERE household_id = $1 ORDER BY id`, hh)
+		`SELECT u.id, u.display_name
+		 FROM app_user u JOIN household_member m
+		   ON m.user_id = u.id AND m.household_id = $1
+		 ORDER BY u.id`, hh)
 	if err != nil {
 		return nil, err
 	}

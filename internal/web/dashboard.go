@@ -40,6 +40,16 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sess := sessionFromContext(ctx)
 	hh := sess.Household
+	// D28 recovery: the caller has no current household (fresh account that
+	// hasn't joined/founded one, or their default was deleted). Offer both
+	// exits: found a household, or join one with an invite code.
+	if !sess.HasHousehold() {
+		a.render(w, r, http.StatusOK, "dashboard_no_household.html", map[string]any{
+			"Title": "Dashboard",
+			"Join":  a.pendingJoinPrompt(w, r),
+		})
+		return
+	}
 	p, perr := a.permFor(r)
 	if perr != nil {
 		http.Error(w, "permission load: "+perr.Error(), 500)
@@ -224,7 +234,8 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	a.render(w, r, http.StatusOK, "dashboard.html", map[string]any{
 		"Title":        "Dashboard",
-		"Flash":        flashFrom(r),
+		"Flash":        a.joinFlash(r),
+		"Join":         a.pendingJoinPrompt(w, r),
 		"MonthLabel":   now.Format("January 2006"),
 		"Cats":         cats,
 		"SpendTotal":   spendTotal,

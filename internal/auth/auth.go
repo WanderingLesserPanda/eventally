@@ -7,6 +7,7 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -103,7 +104,9 @@ func constantTimeEqual(a, b []byte) bool {
 	return x == 0
 }
 
-// Session is a live, verified session.
+// Session is a live, verified session. Household is the household the
+// session is viewing; 0 while the user has no current household (D28
+// recovery state — the dashboard shows create/join prompts instead).
 type Session struct {
 	ID        string
 	Household int64
@@ -111,6 +114,9 @@ type Session struct {
 	CSRFToken string
 	ExpiresAt time.Time
 }
+
+// HasHousehold reports whether the session is viewing a household.
+func (s *Session) HasHousehold() bool { return s.Household != 0 }
 
 // Token generates a cryptographically random session id.
 func Token() (string, error) {
@@ -162,7 +168,9 @@ type Store struct {
 // NewStore returns a session store.
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-// Create inserts a new session for the user.
+// Create inserts a new session for the user. household 0 (no current
+// household) is stored as NULL, so a household-less login can still start
+// a session (D28 recovery).
 func (s *Store) Create(ctx context.Context, household, userID int64, userAgent, ip string) (*Session, error) {
 	id, err := Token()
 	if err != nil {
@@ -173,14 +181,35 @@ func (s *Store) Create(ctx context.Context, household, userID int64, userAgent, 
 		return nil, err
 	}
 	expires := time.Now().Add(SessionTTL)
+	var hhPtr *int64
+	if household != 0 {
+		hhPtr = &household
+	}
 	_, err = s.pool.Exec(ctx,
 		`INSERT INTO session (id, household_id, user_id, csrf_token, user_agent, ip, expires_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		id, household, userID, csrf, userAgent, ip, expires)
+		id, hhPtr, userID, csrf, userAgent, ip, expires)
 	if err != nil {
 		return nil, err
 	}
 	return &Session{ID: id, Household: household, UserID: userID, CSRFToken: csrf, ExpiresAt: expires}, nil
+}
+
+// SetHousehold patches the session's viewed household (switch / join /
+// default-household change). 0 clears it to NULL.
+func (s *Store) SetHousehold(ctx context.Context, id string, household int64) error {
+	var hhPtr *int64
+	if household != 0 {
+		hhPtr = &household
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE session SET household_id = $2 WHERE id = $1`, id, hhPtr)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("no such session")
+	}
+	return nil
 }
 
 // Get loads a session by cookie id. Returns ErrNoUser-shaped nil when
@@ -190,13 +219,17 @@ func (s *Store) Get(ctx context.Context, id string) (*Session, error) {
 		return nil, errors.New("no session")
 	}
 	var sess Session
+	var hh sql.NullInt64
 	var expires time.Time
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, household_id, user_id, csrf_token, expires_at
 		 FROM session WHERE id = $1`, id).
-		Scan(&sess.ID, &sess.Household, &sess.UserID, &sess.CSRFToken, &expires)
+		Scan(&sess.ID, &hh, &sess.UserID, &sess.CSRFToken, &expires)
 	if err != nil {
 		return nil, errors.New("unknown session")
+	}
+	if hh.Valid {
+		sess.Household = hh.Int64
 	}
 	if time.Now().After(expires) {
 		s.Delete(ctx, id)

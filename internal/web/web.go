@@ -80,6 +80,12 @@ func (a *App) Router() http.Handler {
 	r.Get("/setup", a.handleFirstRun)
 	r.Post("/setup", a.handleFirstRunPost)
 
+	// D28 permission-UI wave: public join (new users) + household creation.
+	r.Get("/join", a.handleJoinGET)
+	r.Post("/join", a.handleJoinPOST)
+	r.Get("/households/new", a.handleNewHouseholdGET)
+	r.Post("/households/new", a.handleNewHouseholdPOST)
+
 	// Authenticated area: reference data, transactions, cards,
 	// reconciliation, recurring, settings mount under this group.
 	r.Group(func(authed chi.Router) {
@@ -153,6 +159,21 @@ func (a *App) Router() http.Handler {
 		authed.Post("/recurring/{id}/deactivate", a.handleRecurringDeactivate)
 		authed.Get("/review", a.handleReview)
 		authed.Post("/review/bulk", a.handleReviewBulk)
+
+		// D28 permission-UI wave: settings (3 tabs), household switcher,
+		// invitations, in-app join.
+		authed.Get("/settings", a.handleSettings)
+		authed.Post("/settings/household", a.handleDefaultHouseholdPOST)
+		authed.Post("/settings/invite", a.handleInviteCreate)
+		authed.Post("/settings/invite/revoke/{id}", a.handleInviteRevoke)
+		authed.Post("/settings/invite/expiry", a.handleSetDefaultExpiry)
+		authed.Post("/settings/grants/household/{id}", a.handleHouseholdGrantSave)
+		authed.Post("/settings/grants/account", a.handleAccountGrantSave)
+		authed.Post("/households/switch", a.handleHouseholdSwitch)
+		authed.Post("/join/dismiss", a.handleJoinDismiss)
+		authed.Post("/join/complete", a.handleJoinComplete)
+		authed.Get("/join-with-code", a.handleJoinWithCodeGET)
+		authed.Post("/join-with-code", a.handleJoinWithCodePOST)
 	})
 
 	return r
@@ -172,15 +193,32 @@ func (a *App) sessionLoader(next http.Handler) http.Handler {
 	})
 }
 
-// requireAuth sends unauthenticated requests to /login.
+// requireAuth sends unauthenticated requests to /login. A session with no
+// current household (D28 recovery state) may only reach the recovery
+// surface: the dashboard, household creation, join flows, and the settings
+// household tab — everything else bounces back to the dashboard.
 func (a *App) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if sessionFromContext(r.Context()) == nil {
+		sess := sessionFromContext(r.Context())
+		if sess == nil {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		if sess.Household == 0 && !householdlessAllowed(r.URL.Path) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// householdlessAllowed lists the paths a no-household session may use.
+func householdlessAllowed(path string) bool {
+	switch path {
+	case "/", "/households/new", "/join/complete", "/join/dismiss", "/settings", "/join-with-code":
+		return true
+	}
+	return false
 }
 
 // requireCSRF rejects authenticated POSTs without a valid csrf field.
@@ -216,7 +254,10 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleLoginPost verifies credentials and starts a session.
+// handleLoginPost verifies credentials and starts a session. Landing
+// (D28): default_household_id if still a membership, else the first
+// remaining membership, else a household-less session (the dashboard
+// recovery screen offers creating a household).
 func (a *App) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	if err := a.checkCSRF(r); err != nil {
 		http.Error(w, "CSRF check failed", http.StatusForbidden)
@@ -225,14 +266,19 @@ func (a *App) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	var household, userID int64
+	var userID int64
 	var hash string
 	err := a.Pool.QueryRow(r.Context(),
-		`SELECT household_id, id, password_hash
-		 FROM app_user WHERE username = $1`, username).
-		Scan(&household, &userID, &hash)
+		`SELECT id, password_hash FROM app_user WHERE username = $1`, username).
+		Scan(&userID, &hash)
 	if err != nil || auth.CheckPassword(hash, password) != nil {
 		http.Redirect(w, r, "/login?err=1", http.StatusSeeOther)
+		return
+	}
+	household, err := a.landHousehold(r.Context(), userID)
+	if err != nil {
+		log.Printf("login land: %v", err)
+		http.Error(w, "could not determine your household", http.StatusInternalServerError)
 		return
 	}
 	sess, err := a.Sessions.Create(r.Context(), household, userID,

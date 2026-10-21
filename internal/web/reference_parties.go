@@ -148,7 +148,7 @@ func (a *App) parsePartyForm(r *http.Request) PartyForm {
 	if f.UserID > 0 {
 		var n int
 		err := a.Pool.QueryRow(r.Context(),
-			`SELECT count(*) FROM app_user WHERE id = $1 AND household_id = $2`,
+			`SELECT count(*) FROM household_member WHERE user_id = $1 AND household_id = $2`,
 			f.UserID, sessionFromContext(r.Context()).Household).Scan(&n)
 		if err != nil || n == 0 {
 			f.Err = "Unknown household member."

@@ -1035,7 +1035,7 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 	} else {
 		var n int
 		if err := a.Pool.QueryRow(ctx,
-			`SELECT count(*) FROM app_user WHERE id = $1 AND household_id = $2`,
+			`SELECT count(*) FROM household_member WHERE user_id = $1 AND household_id = $2`,
 			paidBy, hh).Scan(&n); err != nil || n == 0 {
 			f.Err = "Payer not found."
 		}
@@ -1235,7 +1235,10 @@ func (a *App) handleSettlementDelete(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) userOptions(ctx context.Context, hh int64) ([]opt, error) {
 	rows, err := a.Pool.Query(ctx,
-		`SELECT id, display_name FROM app_user WHERE household_id = $1 ORDER BY id`, hh)
+		`SELECT u.id, u.display_name
+		 FROM app_user u JOIN household_member m
+		   ON m.user_id = u.id AND m.household_id = $1
+		 ORDER BY u.id`, hh)
 	if err != nil {
 		return nil, err
 	}

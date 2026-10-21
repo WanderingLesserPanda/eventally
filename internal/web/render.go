@@ -67,7 +67,7 @@ func csrfToken(r *http.Request) string {
 // with no session, and the SameSite=Strict cookie is the same-origin
 // guarantee there.
 func (a *App) checkCSRF(r *http.Request) error {
-	if r.URL.Path == "/login" || r.URL.Path == "/setup" {
+	if r.URL.Path == "/login" || r.URL.Path == "/setup" || r.URL.Path == "/join" {
 		return nil
 	}
 	sess := sessionFromContext(r.Context())
@@ -89,6 +89,15 @@ func (a *App) render(w http.ResponseWriter, r *http.Request, status int, name st
 	data["Session"] = sessionFromContext(r.Context())
 	data["Path"] = r.URL.Path
 	data["Year"] = time.Now().Year()
+	// D28: the nav-bar household switcher (2+ memberships) + current name.
+	if s := sessionFromContext(r.Context()); s != nil && s.HasHousehold() {
+		if ms := a.switchHouseholds(r.Context()); len(ms) > 0 {
+			data["Switcher"] = ms
+		}
+		if name, err := householdName(r.Context(), a.Pool, s.Household); err == nil {
+			data["HouseholdName"] = name
+		}
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// HTML is never cached: the app ships unversioned assets and upgrades by
 	// swapping the container image (docker compose pull). Without this, a

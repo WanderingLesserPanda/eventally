@@ -92,7 +92,10 @@ func (a *App) txnFormOptions(ctx context.Context, hh int64) (*txnOptions, error)
 
 	// Users (split participants).
 	rows, err := a.Pool.Query(ctx,
-		`SELECT id, display_name FROM app_user WHERE household_id = $1 ORDER BY id`, hh)
+		`SELECT u.id, u.display_name
+		 FROM app_user u JOIN household_member m
+		   ON m.user_id = u.id AND m.household_id = $1
+		 ORDER BY u.id`, hh)
 	if err != nil {
 		return nil, err
 	}
@@ -619,14 +622,7 @@ func keysOf(parts []split.Part) []string {
 // pre-save UX layer (friendlier errors before the INSERT).
 func (a *App) validateRefs(ctx context.Context, hh int64, s *txnspec) error {
 	refOK := func(table string, id int64) bool {
-		if id <= 0 {
-			return true
-		}
-		var n int
-		err := a.Pool.QueryRow(ctx,
-			fmt.Sprintf(`SELECT count(*) FROM %s WHERE id = $1 AND household_id = $2`, table),
-			id, hh).Scan(&n)
-		return err == nil && n > 0
+		return refExists(ctx, a.Pool, table, id, hh)
 	}
 	if !refOK("category", s.categoryID) {
 		return fmt.Errorf("category not found")

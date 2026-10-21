@@ -21,15 +21,22 @@ every membership question routes through `household_member`.
 
 ## Consequences
 
-- Migration 000013: `UNIQUE(household_id, username)` → `UNIQUE(username)`;
-  `app_user.household_id` renamed `default_household_id`.
+- Migration 000013: `app_user.household_id` renamed
+  `default_household_id` and made nullable (`ON DELETE SET NULL` — a user
+  must survive the deletion of their default household; they may still
+  belong to others). The uniqueness half was already done: migration 000005
+  dropped the `UNIQUE(household_id, username)` constraint and created
+  `uq_user_username ON user(lower(username))` — global, case-insensitive —
+  because login has always matched on username alone.
 - Every query that lists a household's users must join through
-  `household_member` — a user's default household is not the only one they
-  belong to. (Four such queries today: participant dropdowns on the capture,
-  card, recurring, and review pages.)
+  `household_member` — the user row's `default_household_id` is where they
+  land at login, not which households they belong to. (Seven such queries
+  today: participant dropdowns on the capture, txn, card, and recurring
+  pages; the two party-reference checks; the login row.)
 - `/join` validates the invite code **before** looking at the username, so
   a username collision there means the person exists and should sign in
   instead (the "smart join" flow).
-- Login landing order: `default_household_id` → first remaining household
-  (alphabetical) → "create a new household?" prompt, which is why in-app
-  household creation (creator becomes owner) lands in this wave.
+- Login landing order: `default_household_id` (if still a membership) →
+  first remaining membership (alphabetical by household name) → "create a
+  new household?" prompt, which is why in-app household creation (creator
+  becomes owner) lands in this wave.

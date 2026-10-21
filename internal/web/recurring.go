@@ -111,7 +111,9 @@ func (a *App) handleRecurring(w http.ResponseWriter, r *http.Request) {
 	// Participant display names, resolved once for all rows.
 	nameByRef := map[string]string{}
 	prs, err := a.Pool.Query(r.Context(), `
-		SELECT 'user:'||id, display_name FROM app_user WHERE household_id = $1
+		SELECT 'user:' || u.id, u.display_name
+		FROM app_user u
+		JOIN household_member m ON m.user_id = u.id AND m.household_id = $1
 		UNION ALL
 		SELECT 'cp:'||id, name FROM party WHERE household_id = $1`, hh)
 	if err != nil {
@@ -217,7 +219,10 @@ func (a *App) recurringFormOptions(ctx context.Context, hh int64) (*recurringFor
 	}
 	// Users (split participants).
 	rows, err := a.Pool.Query(ctx,
-		`SELECT id, display_name FROM app_user WHERE household_id = $1 ORDER BY id`, hh)
+		`SELECT u.id, u.display_name
+		 FROM app_user u JOIN household_member m
+		   ON m.user_id = u.id AND m.household_id = $1
+		 ORDER BY u.id`, hh)
 	if err != nil {
 		return nil, err
 	}
@@ -483,10 +488,7 @@ func (a *App) saveRecurring(w http.ResponseWriter, r *http.Request, hh, id int64
 		if typ == "household_user" {
 			table = `app_user`
 		}
-		var n int
-		if err := a.Pool.QueryRow(ctx,
-			fmt.Sprintf(`SELECT count(*) FROM %s WHERE id = $1 AND household_id = $2`, table),
-			pid, hh).Scan(&n); err != nil || n == 0 {
+		if !refExists(ctx, a.Pool, table, pid, hh) {
 			f.Err = "A participant is not valid for this household."
 			a.renderRecurringForm(w, r, f)
 			return
@@ -730,10 +732,7 @@ func (a *App) generateRecurringEntry(ctx context.Context, hh int64, d dueTemplat
 		if typ == "household_user" {
 			table = `app_user`
 		}
-		var n int
-		if err := a.Pool.QueryRow(ctx,
-			fmt.Sprintf(`SELECT count(*) FROM %s WHERE id = $1 AND household_id = $2`, table),
-			pid, hh).Scan(&n); err != nil || n == 0 {
+		if !refExists(ctx, a.Pool, table, pid, hh) {
 			return fmt.Errorf("recurring %s: participant %q no longer exists", d.name, k)
 		}
 		seen[k] = true

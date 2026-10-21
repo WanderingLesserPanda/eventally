@@ -87,7 +87,7 @@ func seedHousehold(t *testing.T, pool *pgxpool.Pool) (hh, templateID int64) {
 	for i, nm := range []string{"gate2u1", "gate2u2"} {
 		var id int64
 		if err := pool.QueryRow(ctx,
-			`INSERT INTO app_user (household_id, username, display_name, email, password_hash)
+			`INSERT INTO app_user (default_household_id, username, display_name, email, password_hash)
 			 VALUES ($1, $2, $2, $2||'@test.local', 'x') RETURNING id`,
 			hh, nm).Scan(&id); err != nil {
 			t.Fatalf("user %s: %v", nm, err)
@@ -268,7 +268,7 @@ func TestGate2SettlementLedgerUnique(t *testing.T) {
 		t.Fatalf("household: %v", err)
 	}
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO app_user (household_id, username, display_name, email, password_hash)
+		`INSERT INTO app_user (default_household_id, username, display_name, email, password_hash)
 		 VALUES ($1,'gate2uniq','Gate2 Uniq','u@test.local','x') RETURNING id`, hh).Scan(&user1); err != nil {
 		t.Fatalf("user: %v", err)
 	}

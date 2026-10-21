@@ -34,7 +34,7 @@ func capFixture(t *testing.T, pool *pgxpool.Pool) (hh, userID, partyID, accountI
 		t.Fatalf("household: %v", err)
 	}
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO app_user (household_id, username, display_name, email, password_hash)
+		`INSERT INTO app_user (default_household_id, username, display_name, email, password_hash)
 		 VALUES ($1,'gate4u','Gate4 U','gate4@test.local','x') RETURNING id`, hh).Scan(&userID); err != nil {
 		t.Fatalf("user: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestGate4CurrencyLock(t *testing.T) {
 		t.Fatalf("household: %v", err)
 	}
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO app_user (household_id, username, display_name, email, password_hash)
+		`INSERT INTO app_user (default_household_id, username, display_name, email, password_hash)
 		 VALUES ($1,'gate4c','Gate4 C','gate4c@test.local','x') RETURNING id`,
 		hh).Scan(&userID); err != nil {
 		t.Fatalf("user: %v", err)

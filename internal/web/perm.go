@@ -209,6 +209,22 @@ func (p *perms) canCreateAccount() bool {
 	return p.isOwner() || p.h.create
 }
 
+// canManageGrants reports whether the caller may manage household
+// administration: the owner, or a member holding the admin flag (D27 — the
+// admin tier, explicitly NOT the Create grant).
+func (p *perms) canManageGrants() bool {
+	return p.isOwner() || p.h.admin
+}
+
+// canManageGrants checks the permission gate for settings/grant pages.
+func (a *App) canManageGrants(r *http.Request) bool {
+	p, err := a.permFor(r)
+	if err != nil {
+		return false
+	}
+	return p.canManageGrants()
+}
+
 // ---------------------------------------------------------------------------
 // Account-level (record) decisions
 // ---------------------------------------------------------------------------
