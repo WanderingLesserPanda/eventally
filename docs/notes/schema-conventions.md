@@ -165,17 +165,25 @@ schema currently supports them, or doesn't need them yet.
 - **Household timezone / per-user prefs** — today one app-wide timezone.
 - **Session-token hashing** — store a hash of the session id; deferred
   because the table is only reachable with an authenticated cookie.
-- **Permission enforcement (the owner-controlled permission model)** — the
-  *schema* for this landed in Gate 1 (`household_member.role` = owner/member,
-  `can_edit` = read-only flag, `record_scope` = all / accounts / own, plus the
-  `member_account_scope` table and the no-orphan-household trigger). What's
-  deferred is the *enforcement* code: blocking a read-only member's writes and
-  filtering a scoped member's accounts/records per their `record_scope`. That
-  lands with the invitation UI, and the same wave brings the household picker
-  at login and ownership transfer. Owner-controlled permissions are
-  read/create/edit with a view scope of (all / specific accounts / records the
-  user is tied to). Known accepted gap: until this lands, every member acts as
-  a full admin (data is scoped, but nothing is enforced).
+- **Permission enforcement (the owner- or admin-controlled permission model)**
+  — the model was re-designed after Gate 1 (D27, 2026-10-21, via
+  grill-with-docs): a *household-level* grant per member (Read/Create/Edit/
+  Delete over accounts + Admin flag) complements an *account-level* grant per
+  (member, account) (Read/Create/Edit + view modes). View mode, edit mode and
+  delete mode are each `Related | All`; edit=All forces view=All, delete=All
+  forces both; edit requires read, delete requires read+edit. "Related" is the
+  member's slice: transactions they recorded, in which they are a split party,
+  or that they paid as settlement payer. The owner holds implicit full access
+  and is untouchable; admins are interchangeable below the owner. Gate-1's
+  `can_edit` / `record_scope` columns and the `member_account_scope` table are
+  superseded and get dropped/re-added in a new migration. What's deferred is
+  the *enforcement* code: loading grants into request context, rejecting
+  out-of-scope writes, and filtering read queries per grant. Vocabulary lives
+  in `GLOSSARY.md`. Parked future items this design surfaced: **account
+  archive** (inactive, hidden from non-admins, restorable) and **bulk record
+  delete** (to make a truly empty account deletable). Deletion is strict: an
+  account is deletable only with zero tied records. The invitation UI,
+  household picker at login and ownership transfer still ride in the same wave.
 - **PostgreSQL row-level security (RLS) — deliberately NOT adopted.** The
   reviewer suggested RLS as an extra household-isolation safeguard; it was
   skipped on purpose because the app runs as a single DB role that owns the
