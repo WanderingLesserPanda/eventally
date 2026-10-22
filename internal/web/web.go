@@ -99,7 +99,7 @@ func (a *App) Router() http.Handler {
 		authed.Post("/accounts", a.handleAccountCreate)
 		authed.Get("/accounts/{id}", a.handleAccountEdit)
 		authed.Post("/accounts/{id}", a.handleAccountEdit)
-		authed.Post("/accounts/{id}/deactivate", a.handleAccountDelete)
+		authed.Post("/accounts/{id}/delete", a.handleAccountDelete)
 
 		authed.Get("/categories", a.listCategories)
 		authed.Get("/categories/new", a.handleCategoryCreate)
