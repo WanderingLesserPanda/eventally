@@ -370,11 +370,11 @@ func relatedSliceSQL(uN int) string {
 func relatedSliceSQLAliased(uN int, alias string) string {
 	const tpl = "(" +
 		"COALESCE(@A.recorded_by_user_id, 0) = @U" +
-		"OR EXISTS (SELECT 1 FROM transaction_split s" +
+		" OR EXISTS (SELECT 1 FROM transaction_split s" +
 		" JOIN party p ON p.id = s.party_id" +
 		" WHERE s.transaction_id = @A.id AND p.app_user_id = @U)" +
 		// D31: the settlement's payer is any LEG (funding is a set).
-		"OR EXISTS (SELECT 1 FROM settlement_funding sf" +
+		" OR EXISTS (SELECT 1 FROM settlement_funding sf" +
 		" JOIN settlement st ON st.id = sf.settlement_id" +
 		" JOIN settlement_allocation pa ON pa.payment_id = st.id" +
 		" JOIN transaction_split s ON s.id = pa.split_id" +

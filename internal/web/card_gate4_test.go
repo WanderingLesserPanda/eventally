@@ -78,11 +78,16 @@ func settle(t *testing.T, tx pgx.Tx, hh, userID, splitID int64, amount, alloc fl
 	t.Helper()
 	var payID int64
 	err := tx.QueryRow(context.Background(),
-		`INSERT INTO settlement (household_id, account_id, paid_by_user_id, amount, payment_date, method)
-		 VALUES ($1, NULL, $2, $3, '2026-10-02', 'transfer') RETURNING id`,
-		hh, userID, amount).Scan(&payID)
+		`INSERT INTO settlement (household_id, account_id, amount, payment_date)
+		 VALUES ($1, NULL, $2, '2026-10-02') RETURNING id`,
+		hh, amount).Scan(&payID)
 	if err != nil {
 		t.Fatalf("settlement insert: %v", err)
+	}
+	if _, err := tx.Exec(context.Background(),
+		`INSERT INTO settlement_funding (household_id, settlement_id, user_id, method, amount)
+		 VALUES ($1,$2,$3,'transfer',$4)`, hh, payID, userID, amount); err != nil {
+		t.Fatalf("settlement funding leg: %v", err)
 	}
 	if alloc > 0 {
 		if _, err := tx.Exec(context.Background(),

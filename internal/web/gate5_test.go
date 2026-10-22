@@ -244,19 +244,30 @@ func mkSettlement(t *testing.T, pool *pgxpool.Pool, hh, payer, card, sourceID, s
 	if sourceID > 0 {
 		if err := pool.QueryRow(ctx, `
 			INSERT INTO settlement
-				(household_id, account_id, paid_by_user_id, amount, payment_date, method, ledger_transaction_id)
-			 VALUES ($1,$2,$3,$4,'2026-10-20','transfer',$5) RETURNING id`,
-			hh, card, payer, amount, ledger).Scan(&payID); err != nil {
+				(household_id, account_id, amount, payment_date, ledger_transaction_id)
+				VALUES ($1,$2,$3,'2026-10-20',$4) RETURNING id`,
+			hh, card, amount, ledger).Scan(&payID); err != nil {
 			t.Fatalf("settlement: %v", err)
 		}
 	} else {
 		if err := pool.QueryRow(ctx, `
 			INSERT INTO settlement
-				(household_id, account_id, paid_by_user_id, amount, payment_date, method)
-			 VALUES ($1,$2,$3,$4,'2026-10-20','transfer') RETURNING id`,
-			hh, card, payer, amount).Scan(&payID); err != nil {
+				(household_id, account_id, amount, payment_date)
+				VALUES ($1,$2,$3,'2026-10-20') RETURNING id`,
+			hh, card, amount).Scan(&payID); err != nil {
 			t.Fatalf("settlement: %v", err)
 		}
+	}
+	var legSrc any
+	if sourceID > 0 {
+		legSrc = sourceID
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO settlement_funding (household_id, settlement_id, user_id,
+		 source_account_id, method, amount)
+		 VALUES ($1,$2,$3,$4,'transfer',$5)`,
+		hh, payID, payer, legSrc, amount); err != nil {
+		t.Fatalf("settlement funding leg: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO settlement_allocation (household_id, payment_id, split_id, amount)

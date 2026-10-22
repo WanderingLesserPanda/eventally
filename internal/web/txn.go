@@ -757,6 +757,17 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 		return
 	}
 
+	// D31 History (§B5): load the "before" row inside the transaction, for
+	// the edited-summary diff.
+	var oldRow *txnOldRow
+	if id > 0 {
+		oldRow, err = loadTxnOldRow(ctx, tx, hh, id)
+		if err != nil {
+			http.Error(w, "load transaction: "+err.Error(), 500)
+			return
+		}
+	}
+
 	txnID := id
 	if id == 0 {
 		err = tx.QueryRow(ctx, `
@@ -812,6 +823,32 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 			INSERT INTO transaction_split (household_id, transaction_id, party_id, amount)
 			VALUES ($1, $2, $3, $4)`,
 			hh, txnID, partyIDs[i], spec.shares[i]); err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+	}
+
+	// D31 History (§B5): the audit row commits with the action.
+	{
+		action, summary := "created", "created"
+		if oldRow != nil {
+			action = "edited"
+			summary, err = a.txnEditSummary(ctx, tx, hh, oldRow, spec)
+			if err != nil {
+				http.Error(w, "internal error", 500)
+				return
+			}
+		}
+		name, hdate, hamount, accIDs, relIDs, err := a.txnHistorySnapshot(ctx, tx, hh, txnID)
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		if err := writeHistoryTx(ctx, tx, hh, historyEvent{
+			EntityType: "transaction", EntityID: txnID, Action: action, Summary: summary,
+			Name: name, EventDate: hdate, Amount: hamount,
+			AccountIDs: accIDs, RelatedIDs: relIDs, ActorID: sess.UserID,
+		}); err != nil {
 			http.Error(w, "internal error", 500)
 			return
 		}
@@ -993,6 +1030,11 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 		list = append(list, l)
 	}
 
+	var dlOp int64
+	if s := q.Get("dl_op"); s != "" {
+		dlOp, _ = strconv.ParseInt(s, 10, 64)
+	}
+
 	a.render(w, r, http.StatusOK, "txns.html", map[string]any{
 		"Title":    "Transactions",
 		"Flash":    flashFrom(r),
@@ -1002,6 +1044,7 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 		"Classes":  txnClasses,
 		"Cats":     a.activeCategoryOptions(ctx, hh),
 		"Accts":    a.activeAccountOptions(ctx, hh),
+		"DLop":     dlOp,
 	})
 }
 
@@ -1289,11 +1332,17 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	srows.Close()
 
+	histLines, herr := a.txnHistoryLines(ctx, hh, id)
+	if herr != nil {
+		http.Error(w, "load history: "+herr.Error(), 500)
+		return
+	}
 	a.render(w, r, http.StatusOK, "txn_detail.html", map[string]any{
 		"Title":    "Transaction",
 		"Flash":    flashFrom(r),
 		"T":        t,
 		"Statuses": txnStatuses,
+		"History":  histLines,
 	})
 }
 
@@ -1356,9 +1405,41 @@ func (a *App) handleTxnStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err := a.Pool.Exec(ctx,
+	// D31 History (§B5): every status move is a history event, written in
+	// its own short transaction with the update.
+	tx, err := a.Pool.Begin(ctx)
+	if err != nil {
+		http.Error(w, "internal error", 500)
+		return
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx,
 		`UPDATE "transaction" SET record_status = $3 WHERE id = $1 AND household_id = $2`,
 		id, hh, target); err != nil {
+		http.Error(w, "update status: "+err.Error(), 500)
+		return
+	}
+	action, summary := "edited", "status "+cur+" → "+target
+	if target == "void" {
+		action = "voided"
+		if cur == "pending" {
+			summary = "voided"
+		}
+	}
+	name, hdate, hamount, accIDs, relIDs, err := a.txnHistorySnapshot(ctx, tx, hh, id)
+	if err != nil {
+		http.Error(w, "internal error", 500)
+		return
+	}
+	if err := writeHistoryTx(ctx, tx, hh, historyEvent{
+		EntityType: "transaction", EntityID: id, Action: action, Summary: summary,
+		Name: name, EventDate: hdate, Amount: hamount,
+		AccountIDs: accIDs, RelatedIDs: relIDs, ActorID: sess.UserID,
+	}); err != nil {
+		http.Error(w, "internal error", 500)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
 		http.Error(w, "update status: "+err.Error(), 500)
 		return
 	}

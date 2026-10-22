@@ -69,7 +69,7 @@ CREATE TABLE txn_history (
                      CHECK (entity_type IN ('transaction','settlement')),
     entity_id        BIGINT NOT NULL,
     action           TEXT NOT NULL
-                     CHECK (action IN ('created','edited','voided','deleted')),
+                     CHECK (action IN ('created','edited','voided','deleted','cleared')),
     summary          TEXT NOT NULL DEFAULT '',
     -- Display snapshot (the record's name/date/amount at event time, so a
     -- later rename or the record's own deletion can't blank the trail).
@@ -85,6 +85,12 @@ CREATE TABLE txn_history (
 );
 CREATE INDEX idx_txn_history_household ON txn_history (household_id, created_at DESC);
 CREATE INDEX idx_txn_history_entity ON txn_history (entity_type, entity_id);
+
+-- 3. The D30 deletion_log gains the same write-time access-snapshot columns
+--    (§C2). Pre-000016 rows keep their empty snapshots and therefore keep
+--    today's all-members visibility (no regression).
+ALTER TABLE deletion_log ADD COLUMN account_ids BIGINT[] NOT NULL DEFAULT '{}';
+ALTER TABLE deletion_log ADD COLUMN related_user_ids BIGINT[] NOT NULL DEFAULT '{}';
 
 -- +goose Down
 -- The Down section restores the pre-000016 SHAPES only; a full data

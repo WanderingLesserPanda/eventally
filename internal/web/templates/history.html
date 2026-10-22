@@ -1,0 +1,53 @@
+{{define "page/history"}}
+<div class="card" x-data="{ clearOpen: false }">
+  <div class="page-head">
+    <h1>History</h1>
+    <div class="row">
+      <a class="btn" href="/txns">Transactions</a>
+      {{if .CanClear}}
+      <button type="button" class="btn btn-danger" @click="clearOpen = true">Clear history</button>
+      {{end}}
+    </div>
+  </div>
+  <p class="muted small">Every lifecycle event on money records — created, edited, voided, deleted. Deletions of
+  transactions also live in the <a href="/deletion-log">Deletion log</a>; each event has exactly one home there.
+  A row is visible to the people it involved (or anyone with an All-view on one of its accounts).</p>
+
+  {{if .Rows}}
+  <table>
+    <tr><th>When</th><th>Who</th><th>Record</th><th>Action</th><th>Summary</th></tr>
+    {{range .Rows}}
+    <tr>
+      <td>{{date .At}}</td>
+      <td>{{.Actor}}</td>
+      <td>
+        {{if .Link}}<a href="{{.Link}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}
+        <span class="muted small">{{if .EventDateStr}} · {{.EventDateStr}}{{end}}{{if .AmountStr}} · {{.AmountStr}}{{end}}</span>
+      </td>
+      <td><span class="tag">{{.Action}}</span></td>
+      <td class="muted small">{{.Summary}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p>No history yet — create, edit or void a record and its events will appear here.</p>
+  {{end}}
+
+  {{if .CanClear}}
+  <div x-show="clearOpen" x-cloak class="hh-modal-backdrop" @click.self="clearOpen = false">
+    <div class="hh-modal" role="dialog" aria-modal="true" aria-label="Clear history">
+      <h3>Clear the history?</h3>
+      <p class="muted small">Every history row is removed and a single entry is left recording who cleared it and
+      when. This cannot be undone.</p>
+      <form method="post" action="/history/clear">
+        {{template "csrf" .}}
+        <div class="row">
+          <button type="submit" class="btn-primary">Clear history</button>
+          <button type="button" class="btn-link" @click="clearOpen = false">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {{end}}
+</div>
+{{end}}

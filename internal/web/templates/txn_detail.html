@@ -50,6 +50,25 @@
   <p class="muted">No settlements recorded against this transaction.</p>
   {{end}}
 
+  <details style="margin-top:1.2rem">
+    <summary style="cursor:pointer"><h2 style="display:inline">History</h2></summary>
+    {{if .History}}
+    <table style="margin-top:0.5rem">
+      <tr><th>When</th><th>Who</th><th>Action</th><th>Summary</th></tr>
+      {{range .History}}
+      <tr>
+        <td>{{date .At}}</td>
+        <td>{{.Actor}}</td>
+        <td><span class="tag">{{.Action}}</span></td>
+        <td class="muted small">{{.Summary}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}
+    <p class="muted small">No events recorded for this record yet.</p>
+    {{end}}
+  </details>
+
   <h2>Status</h2>
   {{range .Statuses}}
   {{if ne . $t.Status}}

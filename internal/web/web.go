@@ -140,6 +140,8 @@ func (a *App) Router() http.Handler {
 		authed.Post("/txns/bulk-delete", a.handleBulkDelete)
 		authed.Get("/deletion-log", a.handleDeletionLog)
 		authed.Post("/deletion-log/clear", a.handleDeletionLogClear)
+		authed.Get("/history", a.handleHistory)
+		authed.Post("/history/clear", a.handleHistoryClear)
 
 		// Phase P4: quick capture (mobile-first, D12) — a few taps to a
 		// pending transaction.

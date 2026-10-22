@@ -298,13 +298,24 @@ func TestGate2SettlementLedgerUnique(t *testing.T) {
 		t.Fatalf("txn: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO settlement (household_id, account_id, paid_by_user_id, amount, payment_date, ledger_transaction_id)
-		 VALUES ($1,$2,$3,50.00,'2026-10-02',$4)`, hh, accountID, user1, txnID); err != nil {
+		`INSERT INTO settlement (household_id, account_id, amount, payment_date, ledger_transaction_id)
+		 VALUES ($1,$2,50.00,'2026-10-02',$3)`, hh, accountID, txnID); err != nil {
 		t.Fatalf("first settlement: %v", err)
 	}
+	var firstPay int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM settlement WHERE household_id = $1 AND ledger_transaction_id = $2`,
+		hh, txnID).Scan(&firstPay); err != nil {
+		t.Fatalf("first settlement id: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO settlement_funding (household_id, settlement_id, user_id, method, amount)
+		 VALUES ($1,$2,$3,'transfer',50.00)`, hh, firstPay, user1); err != nil {
+		t.Fatalf("first settlement funding leg: %v", err)
+	}
 	_, err := pool.Exec(ctx,
-		`INSERT INTO settlement (household_id, account_id, paid_by_user_id, amount, payment_date, ledger_transaction_id)
-		 VALUES ($1,$2,$3,60.00,'2026-10-03',$4)`, hh, accountID, user1, txnID)
+		`INSERT INTO settlement (household_id, account_id, amount, payment_date, ledger_transaction_id)
+		 VALUES ($1,$2,60.00,'2026-10-03',$3)`, hh, accountID, txnID)
 	if err == nil {
 		t.Fatalf("second settlement on same ledger txn: expected 23505, but the INSERT succeeded")
 	}

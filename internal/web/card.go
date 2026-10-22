@@ -32,12 +32,14 @@ func pgErrCode(err error) string {
 //     splits) and the computed recorded balance.
 //   - /cards/{id}: outstanding per person, the unpaid transaction_split list (multi-select
 //     for lump-sum payments, D5), and the payment history with allocations.
-//   - /cards/{id}/pay: record a payment. Amount + date + method + paid_by_user_id,
-//     allocation inputs pre-filled with each selected split's outstanding.
-//     Optionally (D6) the same action writes the ledger transfer
-//     savings → card so the recorded card balance stays in step with the
-//     real one; the transfer is a split-less, approved balance movement and
-//     is linked back via payment.ledger_transaction_id.
+//   - /cards/{id}/pay: record a payment. Amount + date + funding legs
+//     (D31: one or more legs — payer, optional source account, method,
+//     amount; the legs sum to the payment amount), allocation inputs
+//     pre-filled with each selected split's outstanding.
+//     Optionally (D6) each ledger leg writes its own transfer
+//     source → card so the recorded card balance stays in step with the
+//     real one; the first funded leg's transfer is a split-less, approved
+//     balance movement linked back via settlement.ledger_transaction_id.
 //
 // Outstanding per transaction_split = split.amount − SUM(allocations) (D5: negative
 // means overpaid, carries forward). Only class='expense' splits are
@@ -430,15 +432,23 @@ func (a *App) cardPayments(ctx context.Context, hh int64, fam []int64) ([]payLin
 	for i := range pays {
 		byPay[pays[i].ID] = &pays[i]
 	}
-	// Funding legs per settlement.
+	// Funding legs per settlement. (Own placeholder set starting at $1: this
+	// query has no household filter, so the allocations query's $1=hh arg must
+	// not be re-supplied — an unreferenced $1 fails type inference (42P18).)
+	legPh := make([]string, len(ids))
+	legArgs := make([]any, 0, len(ids))
+	for i, id := range ids {
+		legPh[i] = fmt.Sprintf("$%d", i+1)
+		legArgs = append(legArgs, id)
+	}
 	lrows, err := a.Pool.Query(ctx, `
 		SELECT sf.settlement_id, COALESCE(u.display_name, '—'),
 		       COALESCE(ac.name, ''), sf.method, sf.amount
 		FROM settlement_funding sf
 		LEFT JOIN app_user u ON u.id = sf.user_id
 		LEFT JOIN account ac ON ac.id = sf.source_account_id
-		WHERE sf.settlement_id IN (`+strings.Join(ph2, ",")+`)
-		ORDER BY sf.id`, args...)
+		WHERE sf.settlement_id IN (`+strings.Join(legPh, ",")+`)
+		ORDER BY sf.id`, legArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1284,6 +1294,29 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	// D31 History (§B5): the settlement's audit row commits with it; the
+	// summary lists the funding legs.
+	{
+		summary, serr := a.settlementLegsSummary(ctx, tx, hh, int64(paymentID))
+		if serr != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		sname, sdate, samt, accIDs, relIDs, serr := a.settlementHistorySnapshot(ctx, tx, hh, int64(paymentID))
+		if serr != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		if err := writeHistoryTx(ctx, tx, hh, historyEvent{
+			EntityType: "settlement", EntityID: int64(paymentID), Action: "created",
+			Summary: summary, Name: sname, EventDate: sdate, Amount: samt,
+			AccountIDs: accIDs, RelatedIDs: relIDs, ActorID: sess.UserID,
+		}); err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+	}
 	for _, as := range allocs {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO settlement_allocation (household_id, payment_id, split_id, amount)
@@ -1369,8 +1402,34 @@ func (a *App) handleSettlementDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err := a.Pool.Exec(ctx, `DELETE FROM settlement WHERE id = $1 AND household_id = $2`,
+	// D31 History (§B5): snapshot first (the legs and allocations cascade
+	// away), then the delete and the audit row commit together.
+	tx, err := a.Pool.Begin(ctx)
+	if err != nil {
+		http.Error(w, "internal error", 500)
+		return
+	}
+	defer tx.Rollback(ctx)
+	sname, sdate, samt, accIDs, relIDs, err := a.settlementHistorySnapshot(ctx, tx, hh, id)
+	if err != nil {
+		http.Error(w, "load payment: "+err.Error(), 500)
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM settlement WHERE id = $1 AND household_id = $2`,
 		id, hh); err != nil {
+		http.Error(w, "delete payment: "+err.Error(), 500)
+		return
+	}
+	if err := writeHistoryTx(ctx, tx, hh, historyEvent{
+		EntityType: "settlement", EntityID: id, Action: "deleted",
+		Summary:  "deleted",
+		Name:     sname, EventDate: sdate, Amount: samt,
+		AccountIDs: accIDs, RelatedIDs: relIDs, ActorID: sess.UserID,
+	}); err != nil {
+		http.Error(w, "internal error", 500)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
 		http.Error(w, "delete payment: "+err.Error(), 500)
 		return
 	}

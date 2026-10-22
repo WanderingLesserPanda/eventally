@@ -9,7 +9,13 @@
       {{end}}
     </div>
   </div>
-  <p class="muted small">One row per record attempted in a bulk delete. Voided records are not logged.</p>
+  <p class="muted small">One row per record attempted in a bulk delete. Voided records are not logged.
+  A row is visible to the people it involved (older rows, from before per-row visibility, stay visible to everyone).</p>
+
+  {{if .Op}}
+  <p class="muted small">Showing only <a href="/deletion-log?op={{.Op}}">operation #{{.Op}}</a> —
+  <a href="/deletion-log">show all operations</a>.</p>
+  {{end}}
 
   {{if .Groups}}
   <table>

@@ -1,6 +1,6 @@
 // D30 §C: bulk void + bulk delete on the /txns list, and the persistent
-// deletion log (deletes only — void auditing belongs to the parked
-// transaction-history enhancement).
+// deletion log (deletes only — void events belong to the D31 History
+// trail, which audits every lifecycle event).
 //
 // Both bulk actions are partial-success, never all-or-nothing: every record
 // is enforced individually against its grants. The flash reports counts only
@@ -8,8 +8,9 @@
 // to …") — no per-record names.
 //
 // Bulk DELETE additionally writes one deletion_log row per attempted record
-// (snapshot name/date/amount, outcome, reason, actor, operation id). Bulk
-// VOID outcomes are NOT logged.
+// (snapshot name/date/amount, outcome, reason, actor, operation id) with the
+// record's write-time access snapshot (D31 §C2). Bulk VOID successes write a
+// History event instead (one per record, same DB transaction as the void).
 package web
 
 import (
@@ -80,9 +81,37 @@ func (a *App) handleBulkVoid(w http.ResponseWriter, r *http.Request) {
 			fails++
 			continue
 		}
-		if _, err := a.Pool.Exec(ctx,
+		// D31 History (§B5): the void event commits with the void itself.
+		tx, err := a.Pool.Begin(ctx)
+		if err != nil {
+			fails++
+			continue
+		}
+		defer tx.Rollback(ctx)
+		if _, err := tx.Exec(ctx,
 			`UPDATE "transaction" SET record_status = 'void' WHERE id = $1 AND household_id = $2`,
 			id, hh); err != nil {
+			fails++
+			continue
+		}
+		summary := "voided"
+		if cur != "pending" {
+			summary = "status " + cur + " → void"
+		}
+		name, hdate, hamount, accIDs, relIDs, err := a.txnHistorySnapshot(ctx, tx, hh, id)
+		if err != nil {
+			fails++
+			continue
+		}
+		if err := writeHistoryTx(ctx, tx, hh, historyEvent{
+			EntityType: "transaction", EntityID: id, Action: "voided", Summary: summary,
+			Name: name, EventDate: hdate, Amount: hamount,
+			AccountIDs: accIDs, RelatedIDs: relIDs, ActorID: sess.UserID,
+		}); err != nil {
+			fails++
+			continue
+		}
+		if err := tx.Commit(ctx); err != nil {
 			fails++
 			continue
 		}
@@ -133,10 +162,13 @@ func (a *App) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 	for _, id := range ids {
 		// Snapshot for the log row (the row disappears on success). Amount is
 		// scanned as int64 exactly like the /txns list (money.Money) so the log
-		// formats identically.
+		// formats identically. The access snapshot (D31 §C2) is taken from the
+		// record WHILE IT STILL EXISTS, so the row's per-row visibility is
+		// stable after the delete.
 		var name string
 		var date *time.Time
 		var amount *int64
+		var accIDs, relIDs []int64
 		err := a.Pool.QueryRow(ctx,
 			`SELECT COALESCE(NULLIF(t.description, ''), COALESCE(m.name, ''), '—'),
 			       t.transaction_date, t.total_amount
@@ -144,12 +176,23 @@ func (a *App) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 			 LEFT JOIN merchant m ON m.id = t.merchant_id
 			 WHERE t.id = $1 AND t.household_id = $2`, id, hh).
 			Scan(&name, &date, &amount)
+		if err == nil {
+			// Best-effort snapshot: a lookup failure keeps the row visible to
+			// all members (empty snapshot = legacy behaviour).
+			var sAcc []int64
+			var sRel []int64
+			if sAcc, err = a.txnSurfaceIDs(ctx, hh, id); err == nil {
+				sRel, _ = a.txnRelatedIDs(ctx, hh, id)
+			}
+			accIDs, relIDs = sAcc, sRel
+		}
 		logRow := func(outcome, reason string) {
 			_, lerr := a.Pool.Exec(ctx,
 				`INSERT INTO deletion_log
-				   (household_id, operation_id, txn_id, txn_name, txn_date, amount, outcome, reason, actor_id)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-				hh, opID, id, name, date, amount, outcome, reason, sess.UserID)
+				   (household_id, operation_id, txn_id, txn_name, txn_date, amount, outcome, reason, actor_id,
+				        account_ids, related_user_ids)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+				hh, opID, id, name, date, amount, outcome, reason, sess.UserID, accIDs, relIDs)
 			if lerr != nil {
 				// Best-effort audit row; the action's own outcome still
 				// reports.
@@ -209,7 +252,8 @@ func (a *App) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 	if fails > 0 {
 		msg += fmt.Sprintf(" %d record(s) failed to delete. See the Deletion log for details.", fails)
 	}
-	a.redirectRef(w, r, "/txns", msg)
+	// D31 §C3: deep-link the flash at /txns to this action's log rows.
+	a.redirectRef(w, r, "/txns?dl_op="+strconv.FormatInt(opID, 10), msg)
 }
 
 // --- deletion log ----------------------------------------------------------
@@ -233,7 +277,10 @@ type deletionLogRow struct {
 	Reason    string
 }
 
-// handleDeletionLog is GET /deletion-log: newest first, grouped by operation.
+// handleDeletionLog is GET /deletion-log: newest first, grouped by
+// operation, per-row visibility applied (ADR-0005). ?op=<operation_id>
+// narrows the view to one bulk action's rows (the deep link from the
+// post-bulk-delete flash, design doc §C3).
 func (a *App) handleDeletionLog(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sess := sessionFromContext(ctx)
@@ -243,13 +290,26 @@ func (a *App) handleDeletionLog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "permission load: "+err.Error(), 500)
 		return
 	}
-	rows, err := a.Pool.Query(ctx,
-		`SELECT dl.operation_id, dl.created_at, COALESCE(u.display_name, '—'),
-		        dl.txn_id, dl.txn_name, dl.txn_date, dl.amount, dl.outcome, dl.reason
-		 FROM deletion_log dl
-		 LEFT JOIN app_user u ON u.id = dl.actor_id
-		 WHERE dl.household_id = $1
-		 ORDER BY dl.created_at DESC, dl.id DESC`, hh)
+	var opFilter *int64
+	if s := r.URL.Query().Get("op"); s != "" {
+		if v, perr := strconv.ParseInt(s, 10, 64); perr == nil && v > 0 {
+			opFilter = &v
+		}
+	}
+	args := []any{hh}
+	where := "dl.household_id = $1"
+	if opFilter != nil {
+		args = append(args, *opFilter)
+		where = "dl.household_id = $1 AND dl.operation_id = $2"
+	}
+	rows, err := a.Pool.Query(ctx, `
+		SELECT dl.operation_id, dl.created_at, COALESCE(u.display_name, '—'),
+		       dl.txn_id, dl.txn_name, dl.txn_date, dl.amount, dl.outcome, dl.reason,
+		       dl.account_ids, dl.related_user_ids
+	 FROM deletion_log dl
+	 LEFT JOIN app_user u ON u.id = dl.actor_id
+	 WHERE `+where+`
+	 ORDER BY dl.created_at DESC, dl.id DESC`, args...)
 	if err != nil {
 		http.Error(w, "load log: "+err.Error(), 500)
 		return
@@ -266,9 +326,17 @@ func (a *App) handleDeletionLog(w http.ResponseWriter, r *http.Request) {
 		var date *time.Time
 		var amount *int64
 		var outcome, reason string
-		if err := rows.Scan(&op, &at, &actor, &txnID, &name, &date, &amount, &outcome, &reason); err != nil {
+		var accIDs, relIDs []int64
+		if err := rows.Scan(&op, &at, &actor, &txnID, &name, &date, &amount, &outcome, &reason,
+			&accIDs, &relIDs); err != nil {
 			http.Error(w, "scan log: "+err.Error(), 500)
 			return
+		}
+		// Per-row visibility (ADR-0005): a member sees a row only if their
+		// snapshot says they could have seen the record. Empty snapshots
+		// (pre-000016 legacy rows and clear tombstones) stay visible to all.
+		if !p.auditRowVisible(accIDs, relIDs) {
+			continue
 		}
 		i, ok := byOp[op]
 		if !ok {
@@ -300,6 +368,7 @@ func (a *App) handleDeletionLog(w http.ResponseWriter, r *http.Request) {
 		"Section":  "txns",
 		"Flash":    flashFrom(r),
 		"Groups":   groups,
+		"Op":       opFilter,
 		"CanClear": p.canManageGrants(), // owner or admin
 	})
 }
