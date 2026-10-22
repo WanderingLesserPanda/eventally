@@ -100,6 +100,8 @@ func (a *App) Router() http.Handler {
 		authed.Get("/accounts/{id}", a.handleAccountEdit)
 		authed.Post("/accounts/{id}", a.handleAccountEdit)
 		authed.Post("/accounts/{id}/delete", a.handleAccountDelete)
+		authed.Post("/accounts/{id}/archive", a.handleAccountArchive)
+		authed.Post("/accounts/{id}/restore", a.handleAccountRestore)
 
 		authed.Get("/categories", a.listCategories)
 		authed.Get("/categories/new", a.handleCategoryCreate)

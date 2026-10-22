@@ -282,12 +282,20 @@ type AccountForm struct {
 }
 
 func (a *App) renderAccountForm(w http.ResponseWriter, r *http.Request, f AccountForm) {
+	a.renderAccountFormL(w, r, f, nil)
+}
+
+// renderAccountFormL is renderAccountForm with the lifecycle facts (archive /
+// restore / delete buttons + modal copy) for the account details page.
+func (a *App) renderAccountFormL(w http.ResponseWriter, r *http.Request, f AccountForm, lc *accountLifecycle) {
 	a.render(w, r, http.StatusOK, "reference_account_form.html", map[string]any{
-		"Title":   "Account form",
-		"Section": "accounts",
-		"F":       f,
-		"Types":   accountTypes,
-		"Editing": f.ID > 0,
+		"Title":     "Account form",
+		"Section":   "accounts",
+		"F":         f,
+		"Types":     accountTypes,
+		"Editing":   f.ID > 0,
+		"Lifecycle": lc,
+		"Flash":     flashFrom(r),
 	})
 }
 
@@ -467,6 +475,11 @@ func (a *App) handleAccountEdit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "You do not have permission to view this account.", http.StatusForbidden)
 		return
 	}
+	lc, err := a.accountLifecycleFor(ctx, hh, id, p)
+	if err != nil {
+		http.Error(w, "load account: "+err.Error(), 500)
+		return
+	}
 	if r.Method == http.MethodPost && !p.canEditAccountObject(cur.ID, cur.CreatedBy) {
 		http.Error(w, "You do not have permission to edit this account.", http.StatusForbidden)
 		return
@@ -474,14 +487,14 @@ func (a *App) handleAccountEdit(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		f := AccountForm{Account: cur}
 		a.fillParentOptions(ctx, &f)
-		a.renderAccountForm(w, r, f)
+		a.renderAccountFormL(w, r, f, lc)
 		return
 	}
 	f := a.parseAccountForm(r)
 	f.ID = cur.ID
 	a.fillParentOptions(ctx, &f)
 	if f.Err != "" {
-		a.renderAccountForm(w, r, f)
+		a.renderAccountFormL(w, r, f, lc)
 		return
 	}
 	_, err = a.Pool.Exec(ctx,

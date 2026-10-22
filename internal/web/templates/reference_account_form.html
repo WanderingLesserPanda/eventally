@@ -1,6 +1,19 @@
 {{define "page/reference_account_form"}}
-<div class="card">
-  <h1>{{if .Editing}}Edit account{{else}}New account{{end}}</h1>
+<div class="card" x-data="{ archiveOpen: false, restoreOpen: false, deleteOpen: false }">
+  <div class="page-head">
+    <h1>{{if .Editing}}Edit account{{else}}New account{{end}}</h1>
+    {{if and .Editing .Lifecycle}}
+    {{if .F.Active}}
+    {{if .Lifecycle.CanArchive}}
+    <button type="button" class="btn" @click="archiveOpen = true">Archive account</button>
+    {{end}}
+    {{else}}
+    {{if .Lifecycle.CanArchive}}
+    <button type="button" class="btn-primary" @click="restoreOpen = true">Restore account</button>
+    {{end}}
+    {{end}}
+    {{end}}
+  </div>
   {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
   <form method="post" action="{{if .Editing}}/accounts/{{.F.ID}}{{else}}/accounts{{end}}">
     {{template "csrf" .}}
@@ -61,5 +74,70 @@
       <a class="btn" href="/accounts">Cancel</a>
     </div>
   </form>
+
+  {{if and .Editing .Lifecycle .Lifecycle.CanDelete}}
+  <hr>
+  <div class="form-actions danger-zone">
+    <button type="button" class="btn btn-danger" @click="deleteOpen = true">Delete account</button>
+    <span class="muted small">Strict delete — only possible while no transactions, settlements or child cards remain.</span>
+  </div>
+  {{end}}
 </div>
+
+{{if and .Editing .Lifecycle .Lifecycle.CanArchive}}
+{{if .F.Active}}
+<div x-show="archiveOpen" x-cloak class="hh-modal-backdrop" @click.self="archiveOpen = false">
+  <div class="hh-modal" role="dialog" aria-modal="true" aria-label="Archive account">
+    <h3>Archive {{.F.Name}}?</h3>
+    <p class="muted small">No new transactions can be posted to this account.{{if .Lifecycle.ActiveTemplates}} {{.Lifecycle.ActiveTemplates}} recurring template(s) will be paused.{{end}} All existing history is kept and stays visible. You can restore this account later.</p>
+    {{if .Lifecycle.ChildCount}}
+    <p class="muted small">{{.Lifecycle.ChildCount}} linked account(s) will remain active.</p>
+    {{end}}
+    <form method="post" action="/accounts/{{.F.ID}}/archive">
+      {{template "csrf" .}}
+      {{if and .Lifecycle.CanCascade .Lifecycle.ChildCount}}
+      <label class="row" style="gap:.5rem">
+        <input type="checkbox" name="cascade_children" value="1">
+        Also archive child accounts
+      </label>
+      {{end}}
+      <div class="row">
+        <button type="submit" class="btn-primary">Archive</button>
+        <button type="button" class="btn-link" @click="archiveOpen = false">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{else}}
+<div x-show="restoreOpen" x-cloak class="hh-modal-backdrop" @click.self="restoreOpen = false">
+  <div class="hh-modal" role="dialog" aria-modal="true" aria-label="Restore account">
+    <h3>Restore {{.F.Name}}?</h3>
+    <p class="muted small">Transactions can be created again against this account. Previously paused recurring templates will not be automatically resumed — re-enable them individually on the Recurring page.</p>
+    <form method="post" action="/accounts/{{.F.ID}}/restore">
+      {{template "csrf" .}}
+      <div class="row">
+        <button type="submit" class="btn-primary">Restore</button>
+        <button type="button" class="btn-link" @click="restoreOpen = false">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{if and .Editing .Lifecycle .Lifecycle.CanDelete}}
+<div x-show="deleteOpen" x-cloak class="hh-modal-backdrop" @click.self="deleteOpen = false">
+  <div class="hh-modal" role="dialog" aria-modal="true" aria-label="Delete account">
+    <h3>Delete {{.F.Name}}?</h3>
+    <p class="muted small">This permanently deletes the account{{if .Lifecycle.TotalTemplates}} and its {{.Lifecycle.TotalTemplates}} recurring template(s){{end}}. It can only be deleted while it has no transactions, settlements or child cards — otherwise the delete is refused.</p>
+    <form method="post" action="/accounts/{{.F.ID}}/delete">
+      {{template "csrf" .}}
+      <div class="row">
+        <button type="submit" class="btn-primary">Delete</button>
+        <button type="button" class="btn-link" @click="deleteOpen = false">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
 {{end}}
