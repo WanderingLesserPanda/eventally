@@ -80,6 +80,15 @@ type unpaidLine struct {
 	Due         money.Money
 }
 
+// payLegLine is one funding leg of a payment-history row (D31: a
+// settlement's funding is a set of legs; the single-payer row is gone).
+type payLegLine struct {
+	Payer      string
+	SourceName string // "" when out-of-band
+	Method     string
+	Amount     money.Money
+}
+
 // payLine is one payment-history row (allocations attached below).
 // Credit is the unapplied portion of the payment: amount − Σ allocations.
 // A settlement may pay more than its allocations (option (a), Gate 4) —
@@ -89,8 +98,7 @@ type payLine struct {
 	Date     time.Time
 	Amount   money.Money
 	Credit   money.Money
-	Method   string
-	PaidBy   string
+	Legs     []payLegLine
 	Notes    string
 	LedgerID int64
 	Allocs   []allocLine
@@ -130,6 +138,17 @@ type payRow struct {
 	Alloc string
 }
 
+// payLegForm is one funding-leg row of the pay form (D31): a payer, an
+// optional source account (empty = out-of-band, e.g. cash), a method, an
+// amount, and the ledger-transfer flag (valid ⇔ a source is selected).
+type payLegForm struct {
+	UserID   int64
+	SourceID int64
+	Method   string
+	Amount   string // as typed; "" on a fresh/added row
+	Ledger   bool
+}
+
 // cardPayForm is the /cards/{id}/pay form (GET and re-render).
 type cardPayForm struct {
 	Err         string
@@ -137,11 +156,8 @@ type cardPayForm struct {
 	CardName    string
 	Amount      string
 	Date        string
-	Method      string
-	PaidBy      int64
-	Ledger      bool
-	SourceID    int64
 	Notes       string
+	Legs        []payLegForm
 	Rows        []payRow
 	AllocSum    money.Money
 	// Unapplied is the part of the typed payment not covered by the
@@ -257,10 +273,11 @@ func (a *App) cardOutstanding(ctx context.Context, hh int64, fam []int64) (money
 // roll-up for a parent):
 //
 //	opening + charges (card as origin) − credits (card as destination)
-//	        − payments without a ledger link (D6: cash settled out-of-band)
+//	        − out-of-band funding legs (D31: legs with no source account)
 //
-// Payments that wrote a D6 transfer are already reflected in the
-// destination=card total, so they are excluded from the payment sum.
+// Legs that wrote a D6 transfer are already reflected in the
+// destination=card total, so they are excluded; each out-of-band leg
+// (cash etc.) still reduces the balance and is subtracted per leg.
 // Each term is an independent scalar subquery — never join account rows
 // to transactions here (that multiplies every amount per account).
 func (a *App) cardRecordedBalance(ctx context.Context, hh int64, fam []int64) (money.Money, error) {
@@ -268,16 +285,17 @@ func (a *App) cardRecordedBalance(ctx context.Context, hh int64, fam []int64) (m
 	ph := inPh(fam)
 	err := a.Pool.QueryRow(ctx, `
 		SELECT COALESCE((SELECT SUM(a.opening_balance) FROM account a
-		                  WHERE a.household_id = $1 AND a.id IN (`+ph+`)), 0)
+	                  WHERE a.household_id = $1 AND a.id IN (`+ph+`)), 0)
 		 + COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
 		        AND t.origin_account_id IN (`+ph+`)), 0)
 		 - COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
 		              WHERE t.household_id = $1 AND t.record_status <> 'void'
 		        AND t.destination_account_id IN (`+ph+`)), 0)
-		 - COALESCE((SELECT SUM(p.amount) FROM settlement p
-		              WHERE p.household_id = $1 AND p.ledger_transaction_id IS NULL
-		        AND p.account_id IN (`+ph+`)), 0)`,
+		 - COALESCE((SELECT SUM(sf.amount) FROM settlement_funding sf
+		              JOIN settlement p ON p.id = sf.settlement_id
+		              WHERE p.household_id = $1 AND p.account_id IN (`+ph+`)
+		        AND sf.source_account_id IS NULL), 0)`,
 		append([]any{hh}, toAny(fam)...)...).Scan(&bal)
 	return bal, err
 }
@@ -353,14 +371,14 @@ func (a *App) cardByPerson(ctx context.Context, hh int64, fam []int64) ([]byPers
 	return out, rows.Err()
 }
 
-// cardPayments loads the card family's payment history with allocations attached.
+// cardPayments loads the card family's payment history with allocations
+// and funding legs attached (D31: the payer is a set of legs).
 func (a *App) cardPayments(ctx context.Context, hh int64, fam []int64) ([]payLine, error) {
 	ph := inPh(fam)
 	rows, err := a.Pool.Query(ctx, `
-		SELECT p.id, p.payment_date, p.amount, p.method, u.display_name,
-		       p.notes, COALESCE(p.ledger_transaction_id, 0)
+		SELECT p.id, p.payment_date, p.amount, p.notes,
+		       COALESCE(p.ledger_transaction_id, 0)
 		FROM settlement p
-		JOIN app_user u ON u.id = p.paid_by_user_id
 		WHERE p.household_id = $1 AND p.account_id IN (`+ph+`)
 		ORDER BY p.payment_date DESC, p.id DESC`, append([]any{hh}, toAny(fam)...)...)
 	if err != nil {
@@ -369,8 +387,7 @@ func (a *App) cardPayments(ctx context.Context, hh int64, fam []int64) ([]payLin
 	var pays []payLine
 	for rows.Next() {
 		var p payLine
-		if err := rows.Scan(&p.ID, &p.Date, &p.Amount, &p.Method, &p.PaidBy,
-			&p.Notes, &p.LedgerID); err != nil {
+		if err := rows.Scan(&p.ID, &p.Date, &p.Amount, &p.Notes, &p.LedgerID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -412,6 +429,34 @@ func (a *App) cardPayments(ctx context.Context, hh int64, fam []int64) ([]payLin
 	byPay := make(map[int64]*payLine, len(pays))
 	for i := range pays {
 		byPay[pays[i].ID] = &pays[i]
+	}
+	// Funding legs per settlement.
+	lrows, err := a.Pool.Query(ctx, `
+		SELECT sf.settlement_id, COALESCE(u.display_name, '—'),
+		       COALESCE(ac.name, ''), sf.method, sf.amount
+		FROM settlement_funding sf
+		LEFT JOIN app_user u ON u.id = sf.user_id
+		LEFT JOIN account ac ON ac.id = sf.source_account_id
+		WHERE sf.settlement_id IN (`+strings.Join(ph2, ",")+`)
+		ORDER BY sf.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for lrows.Next() {
+		var (
+			pid int64
+			l   payLegLine
+		)
+		if err := lrows.Scan(&pid, &l.Payer, &l.SourceName, &l.Method, &l.Amount); err != nil {
+			return nil, err
+		}
+		if p := byPay[pid]; p != nil {
+			p.Legs = append(p.Legs, l)
+		}
+	}
+	lrows.Close()
+	if err := lrows.Err(); err != nil {
+		return nil, err
 	}
 	for arows.Next() {
 		var (
@@ -825,9 +870,6 @@ func (a *App) handleCardPayGet(w http.ResponseWriter, r *http.Request) {
 		CardID:     id,
 		CardName:   name,
 		Date:       time.Now().Format("2006-01-02"),
-		Method:     "transfer",
-		PaidBy:     sess.UserID,
-		Ledger:     true,
 		Methods:    payMethods,
 		NothingDue: len(all) == 0,
 	}
@@ -852,6 +894,11 @@ func (a *App) handleCardPayGet(w http.ResponseWriter, r *http.Request) {
 	} else {
 		f.Amount = total.String()
 		f.AllocSum = total
+		// D31: one pre-filled funding leg — today's single-payer flow:
+		// the actor, the full amount, ledger write ON (pick a source, or
+		// uncheck it for an out-of-band payment).
+		f.Legs = []payLegForm{{UserID: sess.UserID, Method: "transfer",
+			Amount: total.String(), Ledger: true}}
 	}
 	if inst != "" {
 		f.CardName += " · " + inst
@@ -913,14 +960,50 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 	amountStr := strings.TrimSpace(r.FormValue("amount"))
 	amount, aerr := money.Parse(amountStr)
 	date := strings.TrimSpace(r.FormValue("payment_date"))
-	method := r.FormValue("method")
-	if method == "" {
-		method = "transfer"
-	}
-	paidBy, _ := strconv.ParseInt(r.FormValue("paid_by_user_id"), 10, 64)
-	ledger := r.FormValue("write_ledger") == "on"
-	sourceID, _ := strconv.ParseInt(r.FormValue("source_account"), 10, 64)
 	notes := strings.TrimSpace(r.FormValue("notes"))
+
+	// Funding legs (D31): repeated paired form fields. One settlement may
+	// carry several legs; its amount is the sum of the legs. An empty
+	// amount row is a removed leg.
+	type legSpec struct {
+		User   int64
+		Source int64
+		Method string
+		Amount money.Money
+		Typed  string
+		Ledger bool
+	}
+	var legs []legSpec
+	legUsers := r.Form["leg_user[]"]
+	legSources := r.Form["leg_source[]"]
+	legMethods := r.Form["leg_method[]"]
+	legAmounts := r.Form["leg_amount[]"]
+	legLedgers := r.Form["leg_ledger[]"]
+	legMalformed := len(legUsers) != len(legSources) ||
+		len(legUsers) != len(legMethods) || len(legUsers) != len(legAmounts) ||
+		len(legUsers) != len(legLedgers)
+	legErr := ""
+	for i := range legUsers {
+		u, _ := strconv.ParseInt(strings.TrimSpace(legUsers[i]), 10, 64)
+		src, _ := strconv.ParseInt(strings.TrimSpace(legSources[i]), 10, 64)
+		leg := legSpec{User: u, Source: src, Method: strings.TrimSpace(legMethods[i]),
+			Typed: strings.TrimSpace(legAmounts[i]), Ledger: legLedgers[i] == "on"}
+		if leg.Typed == "" {
+			continue // row left empty = no such leg
+		}
+		am, verr := money.Parse(leg.Typed)
+		if verr != nil || am <= 0 {
+			legErr = "Funding leg amounts must be positive numbers."
+			legs = append(legs, leg)
+			break
+		}
+		leg.Amount = am
+		legs = append(legs, leg)
+	}
+	var legSum money.Money
+	for _, lg := range legs {
+		legSum = legSum.Add(lg.Amount)
+	}
 
 	// Parse allocation rows: paired alloc_split[]/alloc[] values. An empty
 	// value means the row is not allocated.
@@ -976,12 +1059,16 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		CardName: name,
 		Amount:   amountStr,
 		Date:     date,
-		Method:   method,
-		PaidBy:   paidBy,
-		Ledger:   ledger,
-		SourceID: sourceID,
 		Notes:    notes,
 		Methods:  payMethods,
+	}
+	for _, lg := range legs {
+		f.Legs = append(f.Legs, payLegForm{UserID: lg.User, SourceID: lg.Source,
+			Method: lg.Method, Amount: lg.Typed, Ledger: lg.Ledger})
+	}
+	if len(f.Legs) == 0 {
+		f.Legs = []payLegForm{{UserID: sess.UserID, Method: "transfer",
+			Amount: amountStr, Ledger: true}}
 	}
 	if inst != "" {
 		f.CardName += " · " + inst
@@ -1021,40 +1108,62 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		f.Err = "Payment amount is required."
 	} else if malformed {
 		f.Err = "Allocation form is malformed."
+	} else if legMalformed {
+		f.Err = "Funding form is malformed."
 	} else if !isDateStr(date) {
 		f.Err = "Payment date is required (YYYY-MM-DD)."
-	} else if !inSlice(method, payMethods) {
-		f.Err = "Payment method is not recognised."
-	} else if paidBy <= 0 {
-		f.Err = "Choose who made the payment."
 	} else if len(allocs) == 0 {
 		f.Err = "Allocate the payment to at least one item."
 	} else if allocSum.Cmp(amount) > 0 {
 		f.Err = fmt.Sprintf("Allocations sum to %s but the payment is only %s — you cannot allocate more than the payment.",
 			allocSum.String(), amount.String())
+	} else if legErr != "" {
+		f.Err = legErr
+	} else if len(legs) == 0 {
+		f.Err = "Add at least one funding leg (who is paying, and how much)."
+	} else if legSum.Cmp(amount) != 0 {
+		f.Err = fmt.Sprintf("Funding legs sum to %s but the settlement is %s — the legs must add up exactly.",
+			legSum.String(), amount.String())
 	} else {
-		var n int
-		if err := a.Pool.QueryRow(ctx,
-			`SELECT count(*) FROM household_member WHERE user_id = $1 AND household_id = $2`,
-			paidBy, hh).Scan(&n); err != nil || n == 0 {
-			f.Err = "Payer not found."
+		members, merr := a.householdMemberIDs(ctx, hh)
+		if merr != nil {
+			f.Err = "Could not load the household members."
 		}
-	}
-
-	if f.Err == "" && ledger {
-		if sourceID <= 0 {
-			f.Err = "Choose the account the payment is made from (ledger transfer)."
-		} else {
-			var sBalance string
-			if err := a.Pool.QueryRow(ctx, `
-				SELECT balance_type FROM account
-				WHERE id = $1 AND household_id = $2`, sourceID, hh).
-				Scan(&sBalance); err != nil {
-				f.Err = "Source account not found."
-			} else if sourceID == id {
-				f.Err = "The source account is the card itself."
-			} else if sBalance != "asset" {
-				f.Err = "The ledger transfer must come from an asset account (savings, cash or e-wallet)."
+		for i, lg := range legs {
+			if !members[lg.User] {
+				f.Err = fmt.Sprintf("Funding leg %d: choose a payer (a member of this household).", i+1)
+				break
+			}
+			if !inSlice(lg.Method, payMethods) {
+				f.Err = fmt.Sprintf("Funding leg %d: payment method is not recognised.", i+1)
+				break
+			}
+			// Per leg: ledger write ⇔ source selected.
+			if lg.Ledger && lg.Source <= 0 {
+				f.Err = fmt.Sprintf("Funding leg %d: the ledger transfer needs a source account (or uncheck it for an out-of-band payment).", i+1)
+				break
+			}
+			if !lg.Ledger && lg.Source > 0 {
+				f.Err = fmt.Sprintf("Funding leg %d: a source account means the ledger transfer — check the ledger box (or clear the account for an out-of-band payment).", i+1)
+				break
+			}
+			if lg.Ledger {
+				var sBalance string
+				if err := a.Pool.QueryRow(ctx, `
+					SELECT balance_type FROM account
+					WHERE id = $1 AND household_id = $2`, lg.Source, hh).
+					Scan(&sBalance); err != nil {
+					f.Err = fmt.Sprintf("Funding leg %d: source account not found.", i+1)
+					break
+				}
+				if lg.Source == id {
+					f.Err = fmt.Sprintf("Funding leg %d: the source account is the card itself.", i+1)
+					break
+				}
+				if sBalance != "asset" {
+					f.Err = fmt.Sprintf("Funding leg %d: the ledger transfer must come from an asset account (savings, cash or e-wallet).", i+1)
+					break
+				}
 			}
 		}
 	}
@@ -1069,15 +1178,32 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gate 5 write check (anchor rule + D6): the settlement's surface is the
-	// card family, plus the source account when a ledger transfer is
-	// written. The payer's own accounts are irrelevant.
-	if !p.canCreateSettlement(settlementCreateSurface(fam, ledger, sourceID)) {
-		if ledger {
-			f.Err = "You do not have permission to record a payment on this card (or its source account)."
-		} else {
-			f.Err = "You do not have permission to record a payment on this card."
+	// Gate 5 write check (anchor rule + D6, per leg): the settlement's
+	// create surface is the card family plus the source account of EVERY
+	// leg that writes a ledger transfer. The payers' own accounts are
+	// irrelevant.
+	srcs := make([]int64, 0, len(legs))
+	for _, lg := range legs {
+		if lg.Ledger {
+			srcs = append(srcs, lg.Source)
 		}
+	}
+	if !p.canCreateSettlement(settlementCreateSurface(fam, srcs)) {
+		// Name the first leg source the actor can't touch (design doc §A3).
+		msg := "You do not have permission to record a payment on this card."
+		for _, lg := range legs {
+			if lg.Ledger && !p.canCreateOn(lg.Source) {
+				var an string
+				_ = a.Pool.QueryRow(ctx, `
+					SELECT name FROM account WHERE id = $1 AND household_id = $2`,
+					lg.Source, hh).Scan(&an)
+				if an != "" {
+					msg = "You do not have permission to fund this settlement from " + an + "."
+				}
+				break
+			}
+		}
+		f.Err = msg
 	}
 	if f.Err != "" {
 		f.Users, _ = a.userOptions(ctx, hh)
@@ -1099,10 +1225,17 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 
-	var ledgerTxnID any
-	if ledger {
+	// One D6 transfer per funded leg (same payment date; the actor is the
+	// recorder). The FIRST funded leg's transfer carries the settlement's
+	// ledger link (the unique index keeps one link per settlement); the
+	// others remain separate transfer records (design doc §A2/§A5).
+	var linkedTransferID any
+	for i, lg := range legs {
+		if !lg.Ledger {
+			continue
+		}
 		tid := 0
-		desc := fmt.Sprintf("Card payment: %s (%s)", name, date)
+		desc := fmt.Sprintf("Card payment: %s (leg %d of %d)", name, i+1, len(legs))
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO "transaction" (
 				household_id, recorded_by_user_id, transaction_date, class,
@@ -1113,25 +1246,43 @@ func (a *App) handleCardPayPost(w http.ResponseWriter, r *http.Request) {
 				$6, $7,
 				'approved', 'manual', $8)
 			RETURNING id`,
-			hh, paidBy, date, desc, amount,
-			sourceID, id,
+			hh, sess.UserID, date, desc, lg.Amount,
+			lg.Source, id,
 			"Written by the payment flow (D6) to keep the recorded card balance in step.").
 			Scan(&tid); err != nil {
 			http.Error(w, "ledger transfer: "+err.Error(), 500)
 			return
 		}
-		ledgerTxnID = tid
+		if linkedTransferID == nil {
+			linkedTransferID = tid
+		}
 	}
 
 	paymentID := 0
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO settlement (household_id, account_id, paid_by_user_id, amount,
-		                      payment_date, method, notes, ledger_transaction_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO settlement (household_id, account_id, amount,
+		                      payment_date, notes, ledger_transaction_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id`,
-		hh, id, paidBy, amount, date, method, notes, ledgerTxnID).Scan(&paymentID); err != nil {
+		hh, id, amount, date, notes, linkedTransferID).Scan(&paymentID); err != nil {
 		http.Error(w, "create payment: "+err.Error(), 500)
 		return
+	}
+	// Funding legs (ADR-0004): the legs table is the funding source of
+	// truth; Σ legs = settlement.amount by the validation above.
+	for _, lg := range legs {
+		var src any
+		if lg.Source > 0 {
+			src = lg.Source
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO settlement_funding (household_id, settlement_id, user_id,
+			                              source_account_id, method, amount)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			hh, paymentID, lg.User, src, lg.Method, lg.Amount); err != nil {
+			http.Error(w, "create funding leg: "+err.Error(), 500)
+			return
+		}
 	}
 	for _, as := range allocs {
 		if _, err := tx.Exec(ctx, `
@@ -1232,6 +1383,26 @@ func (a *App) handleSettlementDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- option helpers -------------------------------------------------------------
+
+// householdMemberIDs returns the member user ids of the household (D31:
+// funding-leg payer validation).
+func (a *App) householdMemberIDs(ctx context.Context, hh int64) (map[int64]bool, error) {
+	rows, err := a.Pool.Query(ctx,
+		`SELECT user_id FROM household_member WHERE household_id = $1`, hh)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var uid int64
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+		out[uid] = true
+	}
+	return out, rows.Err()
+}
 
 func (a *App) userOptions(ctx context.Context, hh int64) ([]opt, error) {
 	rows, err := a.Pool.Query(ctx,

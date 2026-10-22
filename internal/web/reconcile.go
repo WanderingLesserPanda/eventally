@@ -195,28 +195,30 @@ func (a *App) handleReconcile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// cardRecordedAtFamily computes the family's recorded card balance as of
-// endOfMonth (inclusive date): opening + charges - credits - out-of-band
-// payments, each restricted to rows dated on or before that day.
+// cardRecordedAtFamily computes the family's ledger liability as of
+// endOfMonth (inclusive date): opening + charges − credits − out-of-band
+// funding legs (D31: legs with no source account), each restricted to
+// rows dated on or before that day.
 func (a *App) cardRecordedAtFamily(ctx context.Context, hh int64, fam []int64, endOfMonth time.Time) (money.Money, error) {
 	var bal money.Money
 	ph := inPh(fam)
 	datePh := "$" + strconv.Itoa(len(fam)+2)
 	err := a.Pool.QueryRow(ctx, `
 		SELECT COALESCE((SELECT SUM(a.opening_balance) FROM account a
-		                  WHERE a.household_id = $1 AND a.id IN (`+ph+`)), 0)
+	                  WHERE a.household_id = $1 AND a.id IN (`+ph+`)), 0)
 		+ COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
-		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.origin_account_id IN (`+ph+`)
-		        AND t.transaction_date <= `+datePh+`), 0)
+	              WHERE t.household_id = $1 AND t.record_status <> 'void'
+	        AND t.origin_account_id IN (`+ph+`)
+	        AND t.transaction_date <= `+datePh+`), 0)
 		- COALESCE((SELECT SUM(t.total_amount) FROM "transaction" t
-		              WHERE t.household_id = $1 AND t.record_status <> 'void'
-		        AND t.destination_account_id IN (`+ph+`)
-		        AND t.transaction_date <= `+datePh+`), 0)
-		- COALESCE((SELECT SUM(p.amount) FROM settlement p
-		              WHERE p.household_id = $1 AND p.ledger_transaction_id IS NULL
-		        AND p.account_id IN (`+ph+`)
-		        AND p.payment_date <= `+datePh+`), 0)`,
+	              WHERE t.household_id = $1 AND t.record_status <> 'void'
+	        AND t.destination_account_id IN (`+ph+`)
+	        AND t.transaction_date <= `+datePh+`), 0)
+		- COALESCE((SELECT SUM(sf.amount) FROM settlement_funding sf
+	              JOIN settlement p ON p.id = sf.settlement_id
+	              WHERE p.household_id = $1 AND p.account_id IN (`+ph+`)
+	        AND sf.source_account_id IS NULL
+	        AND p.payment_date <= `+datePh+`), 0)`,
 		append(append([]any{hh}, toAny(fam)...), endOfMonth)...).Scan(&bal)
 	return bal, err
 }
@@ -346,13 +348,14 @@ func (a *App) handleReconcileMonth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err = a.Pool.Query(ctx, `
-		SELECT p.payment_date, 'payment: ' || u.display_name, p.amount
-		FROM settlement p
-		JOIN app_user u ON u.id = p.paid_by_user_id
+		SELECT p.payment_date, 'payment: ' || COALESCE(u.display_name, '—'), sf.amount
+		FROM settlement_funding sf
+		JOIN settlement p ON p.id = sf.settlement_id
+		LEFT JOIN app_user u ON u.id = sf.user_id
 		WHERE p.household_id = $1 AND p.account_id IN (`+ph+`)
-		  AND p.ledger_transaction_id IS NULL
+		  AND sf.source_account_id IS NULL
 		  AND p.payment_date >= `+mStartPh+` AND p.payment_date <= `+mEndPh+`
-		ORDER BY p.payment_date, p.id`, append(baseArgs, monthStart, monthEnd)...)
+		ORDER BY p.payment_date, p.id, sf.id`, append(baseArgs, monthStart, monthEnd)...)
 	if err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return

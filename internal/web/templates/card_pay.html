@@ -54,46 +54,126 @@
       <label>Settlement date
         <input type="date" name="payment_date" value="{{.F.Date}}" required>
       </label>
-      <label>Method
-        <select name="method">
-          {{range .F.Methods}}
-          <option value="{{.}}" {{if eq $.F.Method .}}selected{{end}}>{{.}}</option>
-          {{end}}
-        </select>
-      </label>
-      <label>Paid by
-        <select name="paid_by">
-          {{range .F.Users}}
-          <option value="{{.ID}}" {{if eq $.F.PaidBy .ID}}selected{{end}}>{{.Name}}</option>
-          {{end}}
-        </select>
-      </label>
       <label>Notes
         <input type="text" name="notes" value="{{.F.Notes}}">
       </label>
     </div>
 
-    <div x-data="{ ledger: {{if .F.Ledger}}true{{else}}false{{end}} }" style="margin-top:1rem">
-      <label class="chip">
-        <input type="checkbox" name="write_ledger" value="on"
-               {{if .F.Ledger}}checked{{end}} x-model="ledger">
-        Also write the ledger transfer (savings → card)
-      </label>
-      <p class="muted small" x-show="ledger" style="margin:0.4rem 0 0">
-        Keeps the recorded card balance in step with the real one — a
-        split-less, approved balance movement linked to this settlement.
-      </p>
-      <div class="form-grid" x-show="ledger" style="margin-top:0.6rem">
-        <label>From account (asset)
-          <select name="source_account">
-            <option value="">— choose —</option>
-            {{range .F.Sources}}
-            <option value="{{.ID}}" {{if eq $.F.SourceID .ID}}selected{{end}}>{{.Name}}</option>
-            {{end}}
-          </select>
-        </label>
-      </div>
-    </div>
+    <fieldset style="margin-top:1rem">
+      <legend>Funding — who pays what</legend>
+      <table id="leg-table">
+        <thead>
+          <tr><th>Paid by</th><th>Method</th><th></th><th>From account (asset)</th><th>Amount</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range $i, $l := .F.Legs}}
+          <tr class="leg-row">
+            <td>
+              <select name="leg_user[]">
+                {{range $.F.Users}}
+                <option value="{{.ID}}" {{if eq $l.UserID .ID}}selected{{end}}>{{.Name}}</option>
+                {{end}}
+              </select>
+            </td>
+            <td>
+              <select name="leg_method[]">
+                {{range $.F.Methods}}
+                <option value="{{.}}" {{if eq $l.Method .}}selected{{end}}>{{.}}</option>
+                {{end}}
+              </select>
+            </td>
+            <td class="center">
+              <label class="chip" title="Write this leg's savings → card transfer to the ledger">
+                <input type="checkbox" name="leg_ledger[]" value="on" class="leg-ledger"
+                       {{if $l.Ledger}}checked{{end}} onchange="toggleLegSource(this)">
+                ledger
+              </label>
+            </td>
+            <td>
+              <select name="leg_source[]" class="leg-source">
+                <option value="">— none (out-of-band) —</option>
+                {{range $.F.Sources}}
+                <option value="{{.ID}}" {{if eq $l.SourceID .ID}}selected{{end}}>{{.Name}}</option>
+                {{end}}
+              </select>
+            </td>
+            <td>
+              <input type="text" name="leg_amount[]" value="{{.Amount}}" required
+                     style="width:7rem;text-align:right">
+            </td>
+            <td>
+              <button type="button" class="btn-link btn-danger" title="Remove this leg"
+                      onclick="this.closest('tr').querySelector('input[name=\'leg_amount[]\']').value='';this.closest('tr').remove()">✕</button>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      <button type="button" class="btn" onclick="addLeg()">+ Add a funding leg</button>
+      <p class="muted small">Legs must add up to the settlement amount above. Check <b>ledger</b> to write a
+      savings → card transfer for that leg (a source account is required); leave it off for an
+      out-of-band payment (e.g. cash in hand), which counts against the recorded balance without
+      touching the ledger.</p>
+      <template id="leg-row-tpl">
+        <tr class="leg-row">
+          <td>
+            <select name="leg_user[]">
+              {{range .F.Users}}
+              <option value="{{.ID}}">{{.Name}}</option>
+              {{end}}
+            </select>
+          </td>
+          <td>
+            <select name="leg_method[]">
+              {{range .F.Methods}}
+              <option value="{{.}}">{{.}}</option>
+              {{end}}
+            </select>
+          </td>
+          <td class="center">
+            <label class="chip">
+              <input type="checkbox" name="leg_ledger[]" value="on" class="leg-ledger"
+                     onchange="toggleLegSource(this)">
+              ledger
+            </label>
+          </td>
+          <td>
+            <select name="leg_source[]" class="leg-source" disabled>
+              <option value="">— none (out-of-band) —</option>
+              {{range .F.Sources}}
+              <option value="{{.ID}}">{{.Name}}</option>
+              {{end}}
+            </select>
+          </td>
+          <td>
+            <input type="text" name="leg_amount[]" required style="width:7rem;text-align:right">
+          </td>
+          <td>
+            <button type="button" class="btn-link btn-danger" title="Remove this leg"
+                    onclick="this.closest('tr').querySelector('input[name=\'leg_amount[]\']').value='';this.closest('tr').remove()">✕</button>
+          </td>
+        </tr>
+      </template>
+    </fieldset>
+
+    <script>
+      function addLeg() {
+        const tpl = document.getElementById('leg-row-tpl');
+        document.querySelector('#leg-table tbody').appendChild(tpl.content.cloneNode(true));
+      }
+      function toggleLegSource(cb) {
+        const sel = cb.closest('tr').querySelector('.leg-source');
+        if (sel) {
+          sel.disabled = !cb.checked;
+          if (!cb.checked) sel.value = '';
+        }
+      }
+      document.querySelectorAll('.leg-row').forEach(row => {
+        const cb = row.querySelector('.leg-ledger');
+        const sel = row.querySelector('.leg-source');
+        if (cb && sel) sel.disabled = !cb.checked;
+      });
+    </script>
 
     <div class="form-actions">
       <button class="btn btn-primary">Record settlement ({{money .F.AllocSum}}</button>

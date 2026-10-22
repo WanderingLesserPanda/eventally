@@ -127,8 +127,7 @@
     <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap">
       <strong>{{money .Amount}}</strong>
       {{if gt .Credit 0}}<span class="tag" title="Part of this settlement was not allocated to any item — it is carried as unapplied credit.">credit {{money .Credit}}</span>{{end}}
-      <span class="tag">{{.Method}}</span>
-      <span class="muted">{{date .Date}} · paid by {{.PaidBy}}</span>
+      <span class="muted">{{date .Date}}</span>
       {{if .Notes}}<span class="muted small">· {{.Notes}}</span>{{end}}
       {{if gt .LedgerID 0}}<span class="tag approved" title="Wrote the savings → card transfer to the ledger">ledger</span>{{end}}
       <form method="post" action="/settlements/{{.ID}}/delete" style="margin-left:auto;display:inline"
@@ -136,6 +135,13 @@
         <button class="btn-link btn-danger">Delete</button>
       </form>
     </div>
+    {{if .Legs}}
+    <ul class="muted small" style="margin:0.4rem 0 0 1.2rem;padding:0">
+      {{range .Legs}}
+      <li>paid by {{.Payer}} · {{.Method}}{{if .SourceName}} · from {{.SourceName}}{{end}} — <b>{{money .Amount}}</b></li>
+      {{end}}
+    </ul>
+    {{end}}
     {{if .Allocs}}
     <table style="margin-top:0.5rem">
       <thead><tr><th>Item</th><th>Person</th><th class="money">Amount</th></tr></thead>

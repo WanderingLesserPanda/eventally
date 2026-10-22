@@ -368,15 +368,17 @@ func relatedSliceSQL(uN int) string {
 // relatedSliceSQLAliased is relatedSliceSQL for a transaction alias other
 // than `t`.
 func relatedSliceSQLAliased(uN int, alias string) string {
-	const tpl = `(
-		COALESCE(@A.recorded_by_user_id, 0) = @U
-		OR EXISTS (SELECT 1 FROM transaction_split s
-			JOIN party p ON p.id = s.party_id
-			WHERE s.transaction_id = @A.id AND p.app_user_id = @U)
-		OR EXISTS (SELECT 1 FROM settlement_allocation pa
-			JOIN settlement st ON st.id = pa.payment_id
-			JOIN transaction_split s ON s.id = pa.split_id
-			WHERE s.transaction_id = @A.id AND st.paid_by_user_id = @U))`
+	const tpl = "(" +
+		"COALESCE(@A.recorded_by_user_id, 0) = @U" +
+		"OR EXISTS (SELECT 1 FROM transaction_split s" +
+		" JOIN party p ON p.id = s.party_id" +
+		" WHERE s.transaction_id = @A.id AND p.app_user_id = @U)" +
+		// D31: the settlement's payer is any LEG (funding is a set).
+		"OR EXISTS (SELECT 1 FROM settlement_funding sf" +
+		" JOIN settlement st ON st.id = sf.settlement_id" +
+		" JOIN settlement_allocation pa ON pa.payment_id = st.id" +
+		" JOIN transaction_split s ON s.id = pa.split_id" +
+		" WHERE s.transaction_id = @A.id AND sf.user_id = @U))"
 	out := strings.ReplaceAll(tpl, "@A", alias)
 	out = strings.ReplaceAll(out, "@U", "$"+strconv.Itoa(uN))
 	return out
@@ -693,16 +695,18 @@ func (a *App) canSeeSettlement(ctx context.Context, p *perms, settlementID int64
 	if p.anyAllView(surf) {
 		return true, nil
 	}
-	// Otherwise the related slice: payer of this settlement, or a split
-	// party in one of the allocated splits.
-	var payer int64
+	// Otherwise the related slice: payer of ANY leg of this settlement,
+	// or a split party in one of the allocated splits (D31: funding is a
+	// set of legs — the single-payer column is gone, ADR-0004).
+	var legPayers int
 	err = a.Pool.QueryRow(ctx, `
-		SELECT COALESCE(paid_by_user_id, 0) FROM settlement
-		WHERE id = $1 AND household_id = $2`, settlementID, p.hh).Scan(&payer)
+		SELECT count(*) FROM settlement_funding
+		WHERE settlement_id = $1 AND user_id = $2`,
+		settlementID, p.userID).Scan(&legPayers)
 	if err != nil {
 		return false, err
 	}
-	if payer == p.userID {
+	if legPayers > 0 {
 		return true, nil
 	}
 	var split int
@@ -774,12 +778,15 @@ func (p *perms) canCreateCardFamily(ids []int64) bool {
 }
 
 // settlementCreateSurface returns the account surface a settlement create
-// touches (anchor rule + D6): the settlement's own card family plus, when a
-// ledger transfer is written, the source account.
-func settlementCreateSurface(cardFam []int64, ledger bool, sourceID int64) []int64 {
+// touches (anchor rule + D6, per leg): the settlement's own card family
+// plus the source account of every leg that writes a ledger transfer.
+// Out-of-band legs (no source) contribute nothing.
+func settlementCreateSurface(cardFam []int64, sourceIDs []int64) []int64 {
 	ids := append([]int64{}, cardFam...)
-	if ledger && sourceID > 0 {
-		ids = append(ids, sourceID)
+	for _, id := range sourceIDs {
+		if id > 0 {
+			ids = append(ids, id)
+		}
 	}
 	return ids
 }
@@ -888,6 +895,47 @@ func (a *App) strictAccountHasTiedRecords(ctx context.Context, hh, accountID int
 		return false, err
 	}
 	return n3 > 0, nil
+}
+
+// inInt64 reports whether v is in ids.
+func inInt64(ids []int64, v int64) bool {
+	for _, id := range ids {
+		if id == v {
+			return true
+		}
+	}
+	return false
+}
+
+// auditRowVisible is the per-row visibility rule for the audit trails
+// (ADR-0005, shared by the History page and the Deletion log): a member
+// sees a row only if, at the row's event time, they could have seen the
+// record — a read grant on some account in the row's surface snapshot,
+// with either an All-view grant there or membership of the row's
+// related-user snapshot. Owner/admin: every row. A row with EMPTY
+// snapshots is a pre-000016 (legacy) deletion-log row and keeps today's
+// all-members visibility — the source of truth is the snapshot, not live
+// grants, so the answer is stable after the record changes or is deleted.
+func (p *perms) auditRowVisible(accIDs, relIDs []int64) bool {
+	if p.isOwner() {
+		return true
+	}
+	if len(accIDs) == 0 && len(relIDs) == 0 {
+		return true // legacy row (pre-snapshot): all members, as today
+	}
+	for _, id := range accIDs {
+		g, ok := p.acct[id]
+		if !ok || !g.read {
+			continue
+		}
+		if g.viewMode == "All" {
+			return true
+		}
+		if inInt64(relIDs, p.userID) {
+			return true
+		}
+	}
+	return false
 }
 
 // permForTest constructs a perms without a DB (unit coverage of the decision

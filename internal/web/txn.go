@@ -1262,13 +1262,17 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 	// "Settlements" section: transaction -> its settlements).
 	t.Settlements = nil
 	srows, err := a.Pool.Query(ctx, `
-		SELECT p.payment_date, COALESCE(u.display_name, '—'), SUM(pa.amount)
+		SELECT p.payment_date,
+		       COALESCE((SELECT string_agg(DISTINCT COALESCE(u.display_name, '—'), ', ')
+		                   FROM settlement_funding sf
+		                   LEFT JOIN app_user u ON u.id = sf.user_id
+		                   WHERE sf.settlement_id = p.id), '—'),
+		       SUM(pa.amount)
 		FROM settlement_allocation pa
 		JOIN settlement p ON p.id = pa.payment_id
 		JOIN transaction_split s ON s.id = pa.split_id
-		LEFT JOIN app_user u ON u.id = p.paid_by_user_id
 		WHERE s.transaction_id = $1
-		GROUP BY p.payment_date, p.id, u.display_name
+		GROUP BY p.payment_date, p.id
 		ORDER BY p.payment_date, p.id`, id)
 	if err != nil {
 		http.Error(w, "load settlements: "+err.Error(), 500)
