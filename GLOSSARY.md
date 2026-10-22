@@ -69,7 +69,7 @@ may see and (with edit) edit.
 
 **Related**:
 The transactions in a member's slice: ones they recorded, in which they are a
-split party, or that they paid as a settlement payer.
+split party, or that they funded a leg of a settlement (any leg).
 _Avoid_: own (too ambiguous — "their own" is exactly what "Related" clarifies)
 
 **Grant**:
@@ -85,6 +85,31 @@ member. The old owner becomes an admin (full access, no longer untouchable);
 the transfer requires the owner's password. See ADR-0003.
 _Avoid_: handover (fine in speech, but the UI and docs say transfer)
 
+### Money records & audit
+
+**Settlement**:
+Paying down card debt: money moving from one or more funding legs onto a
+credit card, allocated to the people's shares (splits) of the expenses.
+_Avoid_: payment (the old table name), transfer (a leg's D6 ledger transfer
+is a separate record)
+
+**Funding leg**:
+One component of a settlement's funding: a payer, an optional source
+account, a method, and an amount; a settlement's amount is the sum of its
+legs. Legs are fixed at recording — a settlement is created or deleted,
+never edited.
+_Avoid_: payer (the person alone), source (the account alone)
+
+**History**:
+The household audit trail of money-record lifecycles: transactions
+created/edited/voided, settlements created/deleted. Shown per record on the
+transaction details page and household-wide on /history. Per-row visibility:
+a member sees only rows they could have seen at the time; the owner or an
+admin sees all. Clearable by the owner or an admin, which leaves a
+tombstone; no automatic expiry. Deletions are NOT in History — they live in
+the Deletion log.
+_Avoid_: audit log (the D30-era name for this same idea), activity feed
+
 ### Account lifecycle
 
 **Archived account**:
@@ -99,6 +124,7 @@ different action)
 **Deletion log**:
 The persistent audit trail of bulk transaction *deletes*: one row per
 attempted record (what it was, outcome, reason, who, when). Clearable by the
-owner or an admin, which leaves a tombstone row. Voiding is not logged —
-that belongs to the parked transaction-history audit.
-_Avoid_: audit log (that is the broader parked enhancement this log feeds)
+owner or an admin, which leaves a tombstone row. Voiding is not logged here —
+void events live in History (D31).
+_Avoid_: history (History records created/edited/voided events — deletions
+live here)
