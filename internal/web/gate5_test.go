@@ -647,7 +647,12 @@ func TestG5_StrictDelete(t *testing.T) {
 	}
 	_ = txnID
 
-	// Void transactions do NOT count: void the txn, account becomes clean.
+	// D30: voided transactions tie the account too — the transaction→
+	// account FKs are SET NULL and the endpoint invariant forbids an
+	// endpoint-less row, so a voided-only account gets the 400 "tied
+	// records" refusal instead of a delete (G5's original "voids don't
+	// count" expectation was unimplementable: the delete would 500 on
+	// the endpoint CHECK). Deleting the voided record unblocks it.
 	if _, err := pool.Exec(ctx,
 		`UPDATE "transaction" SET record_status = 'void' WHERE id = $1`, txnID); err != nil {
 		t.Fatalf("void txn: %v", err)
@@ -656,8 +661,18 @@ func TestG5_StrictDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("strict check (voided): %v", err)
 	}
+	if !tied {
+		t.Fatalf("voided-only transactions DO tie an account (D30)")
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM "transaction" WHERE id = $1`, txnID); err != nil {
+		t.Fatalf("delete voided txn: %v", err)
+	}
+	tied, err = a.strictAccountHasTiedRecords(ctx, hh, sourceAcct)
+	if err != nil {
+		t.Fatalf("strict check (cleared): %v", err)
+	}
 	if tied {
-		t.Fatalf("voided-only transactions do not tie an account")
+		t.Fatalf("account is clean once the voided record is deleted")
 	}
 }
 

@@ -856,11 +856,15 @@ func (p *perms) anyEditOnFamily(ids []int64) bool {
 // strictAccountHasTiedRecords reports whether an account still has any ledger
 // records (a hard delete is only legal when this is false). Used by the
 // strict-delete rule: an account is deletable only with zero tied records.
+// VOIDED transactions count as tied: the transaction→account FKs are
+// SET NULL and the class-endpoint invariant demands at least one surviving
+// endpoint, so a voided record cannot survive its account — it must be
+// deleted first (bulk delete handles voided records).
 func (a *App) strictAccountHasTiedRecords(ctx context.Context, hh, accountID int64) (bool, error) {
 	var n int
 	err := a.Pool.QueryRow(ctx, `
 		SELECT count(*) FROM "transaction" t
-		WHERE t.household_id = $1 AND t.record_status <> 'void'
+		WHERE t.household_id = $1
 		  AND (t.origin_account_id = $2 OR t.destination_account_id = $2)`, hh, accountID).Scan(&n)
 	if err != nil {
 		return false, err

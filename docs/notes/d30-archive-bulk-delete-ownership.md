@@ -78,7 +78,12 @@ added).
   deleting an account deletes its templates.
 - The strict-delete check stops treating templates as a blocking reason
   (they die with the account). Generated *transactions*, settlements, and
-  child cards still block, exactly as today.
+  child cards still block. (Implementation note, 2026-10-22: *voided*
+  transactions block too — the transaction→account FKs are SET NULL and the
+  class-endpoint invariant demands ≥1 surviving endpoint, so a voided row
+  cannot survive its account; removing the old "non-void only" filter turns
+  what was a raw 500 into the normal 400 "tied records" refusal. Bulk delete
+  can clear voided records first.)
 
 **Migration.** 000015: the FK cascade. (The wave's other schema change, the
 `deletion_log` table in section C, lands in the same migration.)

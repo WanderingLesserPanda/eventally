@@ -519,11 +519,12 @@ func (a *App) handleAccountEdit(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAccountDelete is the STRICT delete (Q4): an account is only removable
-// when it has zero tied records (no non-void transactions, no settlements, no
-// child cards). Recurring templates are NOT tied records — they cascade with
-// the account (migration 000015). It requires the household-level delete
-// grant scoped by the created|all mode. (Archiving is the separate, reversible
-// soft-inactivate — see handleAccountArchive.)
+// when it has zero tied records (no transactions — voided ones included,
+// since the schema cannot keep a voided row without its account endpoints —
+// no settlements, no child cards). Recurring templates are NOT tied records
+// — they cascade with the account (migration 000015). It requires the
+// household-level delete grant scoped by the created|all mode. (Archiving is
+// the separate, reversible soft-inactivate — see handleAccountArchive.)
 func (a *App) handleAccountDelete(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
