@@ -78,3 +78,27 @@ Only the owner and admins can create, change or remove grants of non-owner
 members.
 _Avoid_: permission (when meaning the row held by a user; the individual
 booleans — read/create/edit/admin — are the permission *kinds*)
+
+**Ownership transfer**:
+The owner-only act of handing the household's ownership to an existing
+member. The old owner becomes an admin (full access, no longer untouchable);
+the transfer requires the owner's password. See ADR-0003.
+_Avoid_: handover (fine in speech, but the UI and docs say transfer)
+
+### Account lifecycle
+
+**Archived account**:
+A soft-inactivated account (`is_active = false`): history stays intact and
+readable, new activity is blocked (transactions, settlements, recurring
+endpoints), its recurring templates are paused, and it can be restored at any
+time. Restoring does not resume paused templates or un-archive cascaded
+children.
+_Avoid_: closed, deleted (deleting is the strict zero-history hard delete — a
+different action)
+
+**Deletion log**:
+The persistent audit trail of bulk transaction *deletes*: one row per
+attempted record (what it was, outcome, reason, who, when). Clearable by the
+owner or an admin, which leaves a tombstone row. Voiding is not logged —
+that belongs to the parked transaction-history audit.
+_Avoid_: audit log (that is the broader parked enhancement this log feeds)
