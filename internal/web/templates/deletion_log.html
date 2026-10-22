@@ -1,0 +1,54 @@
+{{define "page/deletion_log"}}
+<div class="card" x-data="{ clearOpen: false }">
+  <div class="page-head">
+    <h1>Deletion log</h1>
+    <div class="row">
+      <a class="btn" href="/txns">Transactions</a>
+      {{if .CanClear}}
+      <button type="button" class="btn btn-danger" @click="clearOpen = true">Clear log</button>
+      {{end}}
+    </div>
+  </div>
+  <p class="muted small">One row per record attempted in a bulk delete. Voided records are not logged.</p>
+
+  {{if .Groups}}
+  <table>
+    {{range .Groups}}
+    <tr class="log-op">
+      <td colspan="5">
+        Operation #{{.OperationID}} — {{date .At}} by {{.Actor}}
+        {{if or .Deleted .Failed}}({{.Deleted}} deleted, {{.Failed}} failed){{end}}
+      </td>
+    </tr>
+    {{range .Rows}}
+    <tr>
+      <td>{{if .DateStr}}{{.DateStr}}{{else}}—{{end}}</td>
+      <td>{{.Name}}</td>
+      <td class="money">{{if .AmountStr}}{{.AmountStr}}{{else}}—{{end}}</td>
+      <td><span class="tag">{{.Outcome}}</span></td>
+      <td>{{if .Reason}}{{.Reason}}{{else}}—{{end}}</td>
+    </tr>
+    {{end}}
+    {{end}}
+  </table>
+  {{else}}
+  <p>No bulk deletes have been attempted yet.</p>
+  {{end}}
+
+  {{if .CanClear}}
+  <div x-show="clearOpen" x-cloak class="hh-modal-backdrop" @click.self="clearOpen = false">
+    <div class="hh-modal" role="dialog" aria-modal="true" aria-label="Clear deletion log">
+      <h3>Clear the deletion log?</h3>
+      <p class="muted small">Every log row is removed and a single entry is left recording who cleared the log and when. This cannot be undone.</p>
+      <form method="post" action="/deletion-log/clear">
+        {{template "csrf" .}}
+        <div class="row">
+          <button type="submit" class="btn-primary">Clear log</button>
+          <button type="button" class="btn-link" @click="clearOpen = false">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {{end}}
+</div>
+{{end}}

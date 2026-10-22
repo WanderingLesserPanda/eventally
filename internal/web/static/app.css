@@ -312,3 +312,12 @@ a.hh-item { cursor: pointer; }
 .grant-controls input[type=checkbox] { width: auto; margin: 0; }
 .grant-controls select { width: auto; margin-top: 0; }
 .grant-admin { border-left: 1px solid var(--line); padding-left: 1rem; }
+
+/* D30: bulk action bar on /txns + deletion-log operation header. */
+.bulk-bar {
+  display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;
+  margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--line);
+}
+.log-op td {
+  padding-top: 1rem; font-weight: 600; color: var(--muted); font-size: 0.85rem;
+}

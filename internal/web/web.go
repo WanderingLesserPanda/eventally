@@ -134,6 +134,12 @@ func (a *App) Router() http.Handler {
 		authed.Post("/txns/{id}/status", a.handleTxnStatus)
 		authed.Post("/txns/{id}/receipt", a.handleTxnReceiptUpload)
 		authed.Post("/txns/{id}/receipt/delete", a.handleTxnReceiptDelete)
+		// D30: bulk void/delete (partial success, per-record grants) + the
+		// persistent deletion log (deletes only; clear = owner/admins).
+		authed.Post("/txns/bulk-void", a.handleBulkVoid)
+		authed.Post("/txns/bulk-delete", a.handleBulkDelete)
+		authed.Get("/deletion-log", a.handleDeletionLog)
+		authed.Post("/deletion-log/clear", a.handleDeletionLogClear)
 
 		// Phase P4: quick capture (mobile-first, D12) — a few taps to a
 		// pending transaction.

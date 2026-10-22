@@ -1,10 +1,26 @@
 {{define "page/txns"}}
 {{$root := .}}
 {{$f := .F}}
-<div class="card">
+<div class="card" x-data="{
+  sel: {},
+  go(url) {
+    const f = document.getElementById('bulkForm');
+    const chosen = Object.keys(this.sel).filter(k => this.sel[k]);
+    if (!chosen.length) return;
+    f.action = url;
+    f.querySelectorAll('.bulk-id').forEach(i => {
+      if (!chosen.includes(i.value)) i.remove();
+    });
+    f.submit();
+  },
+  chosen() { return Object.keys(this.sel).filter(k => this.sel[k]).length; }
+}">
   <div class="page-head">
     <h1>Transactions</h1>
-    <a class="btn-primary" href="/txns/new">＋ New transaction</a>
+    <div class="row">
+      <a class="btn" href="/deletion-log">Deletion log</a>
+      <a class="btn-primary" href="/txns/new">＋ New transaction</a>
+    </div>
   </div>
 
   <form method="get" action="/txns" class="filter-bar">
@@ -40,10 +56,15 @@
   </form>
 
   {{if .List}}
+  <form id="bulkForm" method="post" action="/txns/bulk-void">
   <table>
-    <tr><th>Date</th><th>What</th><th>Category</th><th class="money">Amount</th><th>Flow</th><th>Status</th><th></th></tr>
+    <tr><th></th><th>Date</th><th>What</th><th>Category</th><th class="money">Amount</th><th>Flow</th><th>Status</th><th></th></tr>
     {{range .List}}
     <tr class="{{if eq .Status "void"}}inactive{{end}}">
+      <td>
+        <input type="checkbox" @change="sel[{{.ID}}] = $event.target.checked">
+        <input type="hidden" name="ids[]" value="{{.ID}}" class="bulk-id">
+      </td>
       <td>{{date .Date}}</td>
       <td><a href="/txns/{{.ID}}">{{.Label}}{{if .Original}}<br><span class="muted small">{{.Original}}</span>{{end}}</a></td>
       <td>{{orDash .Category}}</td>
@@ -54,6 +75,12 @@
     </tr>
     {{end}}
   </table>
+  <div class="bulk-bar">
+    <span class="muted small" x-text="chosen() + ' selected'"></span>
+    <button type="button" class="btn" @click="go('/txns/bulk-void')">Void selected</button>
+    <button type="button" class="btn btn-danger" @click="go('/txns/bulk-delete')">Delete selected</button>
+  </div>
+  </form>
   {{else}}
   <p>No transactions match. <a href="/txns/new">Add the first one</a>.</p>
   {{end}}
