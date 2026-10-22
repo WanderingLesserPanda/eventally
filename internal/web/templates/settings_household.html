@@ -33,4 +33,49 @@
   <p class="muted">You belong to no households — <a href="/households/new">create one</a> or <a href="/join-with-code">join with a code</a>.</p>
   {{end}}
 </div>
+
+{{if .IsOwner}}
+<div class="card" x-data="{
+  open: {{if .TransferModalOpen}}true{{else}}false{{end}},
+  sel: '{{.FirstRecipient}}',
+  names: { {{range $i, $r := .Recipients}}{{if $i}} {{end}}{{$r.UserID}}: '{{$r.Name}}'{{end}} },
+  conseq() {
+    const who = this.names[this.sel] || 'The selected member';
+    return 'You will become an admin — full access, but no longer the owner. ' +
+           who + ' becomes the new owner and can change your access from that point on.';
+  }
+}">
+  <h1>Ownership</h1>
+  <p class="muted small">Transfer ownership of this household to another member.</p>
+  {{if .Recipients}}
+  <label class="row" style="gap:.5rem">
+    New owner
+    <select name="recipient" form="transferForm" x-model="sel" style="width:auto">
+      {{range .Recipients}}<option value="{{.UserID}}">{{.Name}}</option>{{end}}
+    </select>
+  </label>
+  <button type="button" class="btn" style="margin-top:.5rem" @click="open = true">Transfer ownership</button>
+
+  <div x-show="open" x-cloak class="hh-modal-backdrop" @click.self="open = false">
+    <div class="hh-modal" role="dialog" aria-modal="true" aria-label="Transfer ownership">
+      <h3>Transfer ownership?</h3>
+      <p class="muted small" x-text="conseq()"></p>
+      {{if .TransferErr}}<div class="error">{{.TransferErr}}</div>{{end}}
+      <form id="transferForm" method="post" action="/household/transfer-ownership">
+        {{template "csrf" .}}
+        <label>Your password *
+          <input type="password" name="password" required autocomplete="current-password">
+        </label>
+        <div class="row" style="margin-top:.75rem">
+          <button type="submit" class="btn-primary">Transfer ownership</button>
+          <button type="button" class="btn-link" @click="open = false">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {{else}}
+  <p class="muted">No one to transfer to — invite a member first.</p>
+  {{end}}
+</div>
+{{end}}
 {{end}}

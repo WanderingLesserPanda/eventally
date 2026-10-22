@@ -48,36 +48,22 @@ func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSettingsHousehold is the Household tab: the caller's default
-// (login-landing) household picker. Disabled when they belong to exactly
-// one household.
+// (login-landing) household picker (disabled when they belong to exactly one
+// household) plus the Ownership section (owner only, D30).
 func (a *App) handleSettingsHousehold(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFromContext(r.Context())
 	if sess == nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	ms, err := a.memberships(r.Context(), sess.UserID)
-	if err != nil {
-		http.Error(w, "load memberships: "+err.Error(), http.StatusInternalServerError)
-		return
+	hh := sess.Household
+	if hh == 0 {
+		hh, _ = a.landHousehold(r.Context(), sess.UserID)
 	}
-	var current int64
-	if sess.Household != 0 {
-		current = sess.Household
-	} else {
-		current, _ = a.landHousehold(r.Context(), sess.UserID)
+	if err := a.renderSettingsHousehold(r.Context(), w, r, hh, sess.UserID,
+		r.URL.Query().Get("err"), "", false); err != nil {
+		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)
 	}
-	for i := range ms {
-		if ms[i].HouseholdID == current {
-			ms[i].IsDefault = true
-		}
-	}
-	a.renderTabbed(w, r, http.StatusOK, "settings_household.html", "household", map[string]any{
-		"Title": "Settings · Household",
-		"Memberships": ms,
-		"Single":  len(ms) == 1,
-		"Err":     r.URL.Query().Get("err"),
-	})
 }
 
 // handleDefaultHouseholdPOST sets the login-landing household (and, for

@@ -178,6 +178,8 @@ func (a *App) Router() http.Handler {
 		authed.Post("/settings/grants/household/{id}", a.handleHouseholdGrantSave)
 		authed.Post("/settings/grants/account", a.handleAccountGrantSave)
 		authed.Post("/households/switch", a.handleHouseholdSwitch)
+		// D30: ownership transfer (owner only, password re-entry, ADR-0003).
+		authed.Post("/household/transfer-ownership", a.handleTransferOwnership)
 		authed.Post("/join/dismiss", a.handleJoinDismiss)
 		authed.Post("/join/complete", a.handleJoinComplete)
 		authed.Get("/join-with-code", a.handleJoinWithCodeGET)
