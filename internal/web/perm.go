@@ -354,7 +354,12 @@ func txnVisibleWhereAliased(p *perms, uN, hN int, alias string) string {
 		"EXISTS (SELECT 1 FROM account_grant ag WHERE ag.user_id = %s AND ag.household_id = %s AND ag.can_read AND ag.account_id IN %s)",
 		u, h, endpoints)
 	slice := relatedSliceSQLAliased(uN, alias)
-	return fmt.Sprintf("(%s OR (%s AND %s))", allView, readSurface, slice)
+	// D33: a party-only row (no account endpoint — a synced copy) has no
+	// All-view surface; it is visible to its Related slice members only.
+	partyOnly := fmt.Sprintf(
+		"(%s.origin_account_id IS NULL AND %s.destination_account_id IS NULL)", alias, alias)
+	return fmt.Sprintf("(%s OR (%s AND %s) OR ((%s) AND %s))",
+		allView, readSurface, slice, partyOnly, slice)
 }
 
 // relatedSliceSQL is the boolean expression TRUE when the user is "related"
@@ -545,6 +550,12 @@ func (p *perms) anyReadOn(ids []int64) bool {
 func (p *perms) canSeeTxn(surface []int64, inSlice bool) bool {
 	if p.isOwner() {
 		return true
+	}
+	if len(surface) == 0 {
+		// D33: a party-only row (a synced record) has no account surface to
+		// grant on — the related slice is the visibility itself (mirrors the
+		// party-only clause of txnVisibleWhereAliased).
+		return inSlice
 	}
 	if p.anyAllView(surface) {
 		return true
@@ -922,6 +933,11 @@ func (p *perms) auditRowVisible(accIDs, relIDs []int64) bool {
 	}
 	if len(accIDs) == 0 && len(relIDs) == 0 {
 		return true // legacy row (pre-snapshot): all members, as today
+	}
+	if len(accIDs) == 0 {
+		// D33: a party-only snapshot (a synced copy has no account
+		// surface) — slice membership only.
+		return inInt64(relIDs, p.userID)
 	}
 	for _, id := range accIDs {
 		g, ok := p.acct[id]

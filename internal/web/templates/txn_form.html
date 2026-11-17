@@ -61,8 +61,8 @@
           </optgroup>
         </select>
       </label>
-      <label>Destination — where it goes
-        <select name="destination_ref" required {{if $f.Locked}}disabled{{end}}>
+      <label>Destination — where it goes{{if $f.Synced}} <span class="muted small">(optional — synced records have no account endpoint)</span>{{end}}
+        <select name="destination_ref" {{if and (not $f.Synced)}}required {{end}}{{if $f.Locked}}disabled{{end}}>
           <option value="">— choose —</option>
           {{$sel := $f.DestSel.Selected}}
           <optgroup label="Accounts">

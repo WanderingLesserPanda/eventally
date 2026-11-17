@@ -59,21 +59,10 @@ func (a *App) handleBulkVoid(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "permission load: "+err.Error(), 500)
 		return
 	}
-	oks, fails := 0, 0
+	ok, fails := 0, 0
 	for _, id := range ids {
 		surface, inRel, aerr := a.txnAccess(ctx, hh, sess.UserID, id)
 		if aerr != nil {
-			fails++
-			continue
-		}
-		var cur string
-		if err := a.Pool.QueryRow(ctx,
-			`SELECT record_status FROM "transaction" WHERE id = $1 AND household_id = $2`,
-			id, hh).Scan(&cur); err != nil {
-			fails++
-			continue
-		}
-		if cur == "void" {
 			fails++
 			continue
 		}
@@ -81,43 +70,17 @@ func (a *App) handleBulkVoid(w http.ResponseWriter, r *http.Request) {
 			fails++
 			continue
 		}
-		// D31 History (§B5): the void event commits with the void itself.
-		tx, err := a.Pool.Begin(ctx)
-		if err != nil {
+		// D33 §C: the centralized void path — it writes the void's History
+		// row and cascades to every synced copy in any household, in one
+		// transaction. A re-void of an already-voided record is a failure
+		// (void is one-way) — errAlreadyVoid included.
+		if err := a.voidTransaction(ctx, sess.UserID, hh, id); err != nil {
 			fails++
 			continue
 		}
-		defer tx.Rollback(ctx)
-		if _, err := tx.Exec(ctx,
-			`UPDATE "transaction" SET record_status = 'void' WHERE id = $1 AND household_id = $2`,
-			id, hh); err != nil {
-			fails++
-			continue
-		}
-		summary := "voided"
-		if cur != "pending" {
-			summary = "status " + cur + " → void"
-		}
-		name, hdate, hamount, accIDs, relIDs, err := a.txnHistorySnapshot(ctx, tx, hh, id)
-		if err != nil {
-			fails++
-			continue
-		}
-		if err := writeHistoryTx(ctx, tx, hh, historyEvent{
-			EntityType: "transaction", EntityID: id, Action: "voided", Summary: summary,
-			Name: name, EventDate: hdate, Amount: hamount,
-			AccountIDs: accIDs, RelatedIDs: relIDs, ActorID: sess.UserID,
-		}); err != nil {
-			fails++
-			continue
-		}
-		if err := tx.Commit(ctx); err != nil {
-			fails++
-			continue
-		}
-		oks++
+		ok++
 	}
-	msg := fmt.Sprintf("%d record(s) successfully voided.", oks)
+	msg := fmt.Sprintf("%d record(s) successfully voided.", ok)
 	if fails > 0 {
 		msg += fmt.Sprintf(" %d record(s) failed to void.", fails)
 	}
@@ -183,6 +146,14 @@ func (a *App) handleBulkDelete(w http.ResponseWriter, r *http.Request) {
 			var sRel []int64
 			if sAcc, err = a.txnSurfaceIDs(ctx, hh, id); err == nil {
 				sRel, _ = a.txnRelatedIDs(ctx, hh, id)
+			}
+			// nil slices would encode as NULL and violate the NOT NULL
+			// array columns (e.g. a synced row has no account surface).
+			if sAcc == nil {
+				sAcc = []int64{}
+			}
+			if sRel == nil {
+				sRel = []int64{}
 			}
 			accIDs, relIDs = sAcc, sRel
 		}

@@ -6,6 +6,7 @@ package web
 // customisation is configuration, not redesign.
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -31,6 +32,58 @@ type dashCardBal struct {
 type dashPersonOut struct {
 	Person string
 	Due    money.Money
+}
+
+// dashCategoryRows loads the dashboard's current-month category rows —
+// budget roll-up (parent budget = sum of the budgetable subtree) and the
+// actuals over the records the caller may see. Extracted from
+// handleDashboard so the D33 tests can assert that a synced row enters the
+// budget with zero query changes. Gate 5: the fragment spliced via %s uses
+// $1 (household) and $4 (user id — the 4th bound value after hh, monthStart,
+// monthEnd).
+func (a *App) dashCategoryRows(ctx context.Context, p *perms, hh, user int64, monthStart, monthEnd time.Time) ([]dashCatRow, error) {
+	rows, err := a.Pool.Query(ctx, fmt.Sprintf(`
+		WITH RECURSIVE tree AS (
+			SELECT id, id AS root_id FROM category
+			WHERE household_id = $1 AND is_active AND parent_id IS NULL
+			UNION ALL
+			SELECT c.id, t.root_id FROM category c
+			JOIN tree t ON c.parent_id = t.id
+			WHERE c.household_id = $1 AND c.is_active
+		)
+		SELECT tops.id, tops.name,
+		       (SELECT COALESCE(SUM(COALESCE(c.budget_per_month, 0)), 0)
+		        FROM category c JOIN tree t ON t.id = c.id
+		        WHERE c.household_id = $1 AND c.is_active
+		          AND t.root_id = tops.id),
+		       (SELECT COALESCE(SUM(a.total_amount), 0) FROM "transaction" a
+		        WHERE a.household_id = $1 AND a.record_status <> 'void'
+		          AND a.class = 'expense'
+		          AND a.transaction_date >= $2 AND a.transaction_date < $3
+		          AND %s
+		          AND a.category_id IN (SELECT t.id FROM tree t
+		                               WHERE t.root_id = tops.id))
+		FROM category tops
+		WHERE tops.household_id = $1 AND tops.is_active
+		  AND tops.parent_id IS NULL AND tops.transaction_class = 'expense'
+		ORDER BY tops.sort_order, tops.name`,
+		txnVisibleWhereAliased(p, 4, 1, "a")),
+		hh, monthStart, monthEnd, user)
+	if err != nil {
+		return nil, err
+	}
+	var cats []dashCatRow
+	for rows.Next() {
+		var c dashCatRow
+		var id int64
+		if err := rows.Scan(&id, &c.Name, &c.Budget, &c.Actual); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		cats = append(cats, c)
+	}
+	rows.Close()
+	return cats, rows.Err()
 }
 
 // handleDashboard renders the home page: current-month spend by
@@ -64,53 +117,8 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// Card 1+5: top-level expense categories, budget roll-up (parent
 	// collects its subtree) and current-month actuals.
-	var cats []dashCatRow
-	// Gate 5: actuals only count transactions the caller may see. The
-	// fragment spliced via %s uses $1 (household) and $4 (user id — the
-	// 4th bound value after hh, monthStart, monthEnd).
-	rows, err := a.Pool.Query(ctx, fmt.Sprintf(`
-		WITH RECURSIVE tree AS (
-			SELECT id, id AS root_id FROM category
-			WHERE household_id = $1 AND is_active AND parent_id IS NULL
-			UNION ALL
-			SELECT c.id, t.root_id FROM category c
-			JOIN tree t ON c.parent_id = t.id
-			WHERE c.household_id = $1 AND c.is_active
-		)
-		SELECT tops.id, tops.name,
-		       (SELECT COALESCE(SUM(COALESCE(c.budget_per_month, 0)), 0)
-		        FROM category c JOIN tree t ON t.id = c.id
-		        WHERE c.household_id = $1 AND c.is_active
-		          AND t.root_id = tops.id),
-		       (SELECT COALESCE(SUM(a.total_amount), 0) FROM "transaction" a
-		        WHERE a.household_id = $1 AND a.record_status <> 'void'
-		          AND a.class = 'expense'
-		          AND a.transaction_date >= $2 AND a.transaction_date < $3
-		          AND %s
-		          AND a.category_id IN (SELECT t.id FROM tree t
-		                               WHERE t.root_id = tops.id))
-		FROM category tops
-		WHERE tops.household_id = $1 AND tops.is_active
-		  AND tops.parent_id IS NULL AND tops.transaction_class = 'expense'
-		ORDER BY tops.sort_order, tops.name`,
-		txnVisibleWhereAliased(p, 4, 1, "a")),
-		hh, monthStart, monthEnd, sess.UserID)
+	cats, err := a.dashCategoryRows(ctx, p, hh, sess.UserID, monthStart, monthEnd)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	for rows.Next() {
-		var c dashCatRow
-		var id int64
-		if err := rows.Scan(&id, &c.Name, &c.Budget, &c.Actual); err != nil {
-			rows.Close()
-			http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		cats = append(cats, c)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -126,7 +134,7 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// Card 2: credit card balances, one row per family (D19): a parent
 	// rolls up its active children; standalone cards show themselves.
 	var cardBals []dashCardBal
-	rows, err = a.Pool.Query(ctx, `
+	rows, err := a.Pool.Query(ctx, `
 		SELECT a.id, a.name
 		FROM account a
 		WHERE a.household_id = $1 AND a.account_type = 'credit_card'

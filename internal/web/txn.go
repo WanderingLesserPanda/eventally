@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -219,6 +220,7 @@ type TxnForm struct {
 	ID      int64
 	Err     string
 	Locked  bool // a settlement already references the splits -> cannot edit
+	Synced  bool // D33: source='sync' — destination is optional, money facts locked
 
 	Class           string
 	Date            string
@@ -322,6 +324,7 @@ func (a *App) loadTxnForm(ctx context.Context, hh, id int64) (*TxnForm, error) {
 	f.Date = t.Date.Format("2006-01-02")
 	f.Class = t.Class
 	f.Total = t.Total.String()
+	f.Synced = t.Source == "sync"
 	f.Description = t.Description
 	f.Notes = t.Notes
 	f.CategoryID = catsel
@@ -415,9 +418,11 @@ type txnspec struct {
 	shares      []money.Money
 }
 
-// parseTxnForm reads and validates the form, including the transaction_split editor.
-// On failure it returns the re-renderable form plus a user message.
-func parseTxnForm(r *http.Request) (*txnspec, *TxnForm, string) {
+// parseTxnForm reads and validates the form, including the transaction_split
+// editor. allowEmptyDest (D33 §D): a synced row has no account endpoint —
+// its surface is the source household's party, so the destination may be
+// left empty (and must not gain one).
+func parseTxnForm(r *http.Request, allowEmptyDest bool) (*txnspec, *TxnForm, string) {
 	f := &TxnForm{
 		Class:           r.FormValue("class"),
 		Date:            strings.TrimSpace(r.FormValue("date")),
@@ -487,7 +492,9 @@ func parseTxnForm(r *http.Request) (*txnspec, *TxnForm, string) {
 	}
 	dt, did, err := parseRef(f.DestSel.Selected)
 	if err != nil {
-		return nil, f, "Choose a destination (where does it go?). Account or party."
+		if !allowEmptyDest || f.DestSel.Selected != "" {
+			return nil, f, "Choose a destination (where does it go?). Account or party."
+		}
 	}
 	if ot == dt && oid == did {
 		return nil, f, "Origin and destination cannot be the same entry."
@@ -546,17 +553,28 @@ func parseTxnForm(r *http.Request) (*txnspec, *TxnForm, string) {
 		}
 		parts = append(parts, p)
 	}
-	if len(parts) == 0 {
+	// A synced row has no split (the copy IS the caller's share as a
+	// single amount — settlement-ineligible by data, D33). Its edit form
+	// renders no participant rows, so parts must be empty; a hand-built
+	// form trying to add one is rejected (a split would make the copy
+	// settlement-eligible).
+	if allowEmptyDest {
+		if len(parts) > 0 {
+			return nil, f, "Synced records have no split — un-sync and re-sync to refresh."
+		}
+	} else if len(parts) == 0 {
 		return nil, f, "Choose at least one participant for the split."
 	}
-	switch f.Mode {
-	case "equal":
-		s.shares = split.EqualSplit(total, len(parts))
-	default:
-		var err error
-		s.shares, err = split.Compute(total, parts)
-		if err != nil {
-			return nil, f, err.Error()
+	if !allowEmptyDest {
+		switch f.Mode {
+		case "equal":
+			s.shares = split.EqualSplit(total, len(parts))
+		default:
+			var err error
+			s.shares, err = split.Compute(total, parts)
+			if err != nil {
+				return nil, f, err.Error()
+			}
 		}
 	}
 	s.parts = parts
@@ -664,7 +682,15 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 		http.Error(w, "permission load: "+perr.Error(), 500)
 		return
 	}
-	spec, f, parseErr := parseTxnForm(r)
+	// D33 §D: on a synced row the destination is optional (the copy has no
+	// account endpoint — its surface is the source household's party).
+	syncedRow := false
+	if id > 0 {
+		_ = a.Pool.QueryRow(r.Context(), `
+			SELECT source = 'sync' FROM "transaction"
+			WHERE id = $1 AND household_id = $2`, id, hh).Scan(&syncedRow)
+		}
+	spec, f, parseErr := parseTxnForm(r, syncedRow)
 	if parseErr != "" {
 		a.reRenderForm(w, r, hh, id, f, parseErr)
 		return
@@ -764,6 +790,22 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 		oldRow, err = loadTxnOldRow(ctx, tx, hh, id)
 		if err != nil {
 			http.Error(w, "load transaction: "+err.Error(), 500)
+			return
+		}
+	}
+
+	// D33 §D edit lock: on a synced row the money facts and structure are
+	// locked to the source — any change to amount/date/class/endpoints is a
+	// 400; classification (category, merchant, description, notes) stays
+	// freely editable (a partner re-classifies the copy that way).
+	if oldRow != nil && syncedRow {
+		oldOType, oldORef := endpointOf(oldRow, true)
+		oldDType, oldDRef := endpointOf(oldRow, false)
+		dateLocked := spec.date != oldRow.Date.Format("2006-01-02")
+		if spec.total != oldRow.Total || dateLocked || spec.class != oldRow.Class ||
+			spec.originType != oldOType || spec.originRef != oldORef ||
+			spec.destType != oldDType || spec.destRef != oldDRef {
+			http.Error(w, "Locked to source — un-sync and re-sync to refresh.", http.StatusBadRequest)
 			return
 		}
 	}
@@ -906,6 +948,7 @@ type txnLine struct {
 	Original  string // e.g. "400 JPY" when Charged != ""
 	FromTo    string
 	Status    string
+	Synced    bool // D33: a synced copy (source='sync') — the "synced ✓" badge
 }
 
 type listFilters struct {
@@ -979,7 +1022,8 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(t.charged_currency, ''), COALESCE(t.amount_original, 0),
 		       t.record_status, COALESCE(c.name, ''), COALESCE(m.name, ''),
 		       COALESCE(oa.name, COALESCE(oc.name, COALESCE(m.name, ''))),
-		       COALESCE(da.name, COALESCE(dc.name, ''))
+		       COALESCE(da.name, COALESCE(dc.name, '')),
+		       t.source = 'sync'
 		FROM "transaction" t
 		LEFT JOIN category c      ON c.id = t.category_id
 		LEFT JOIN merchant m      ON m.id = t.merchant_id
@@ -1006,7 +1050,7 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 			_ = ot
 		)
 		if err := rows.Scan(&l.ID, &l.Date, &desc, &l.Total, &l.Charged, &orig,
-			&l.Status, &l.Category, &merch, &ot, &dt); err != nil {
+			&l.Status, &l.Category, &merch, &ot, &dt, &l.Synced); err != nil {
 			http.Error(w, "scan transaction: "+err.Error(), 500)
 			return
 		}
@@ -1184,6 +1228,7 @@ type txnDetail struct {
 	DestLabel    string
 	Status       string
 	Source       string
+	Synced       bool // D33: a synced copy (source='sync') — the detail badge
 	RecordedBy   string
 	Splits       []splitLine
 	HasAllocs    bool
@@ -1260,6 +1305,7 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.Merchant, t.Category = merch, cat
+	t.Synced = t.Source == "sync"
 	t.Charged = charged
 	if orig != 0 {
 		t.Original = trimNum(orig) + " " + charged
@@ -1392,18 +1438,33 @@ func (a *App) handleTxnStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "You do not have permission to change this transaction's status.", http.StatusForbidden)
 		return
 	}
-	if target != "void" {
-		var n int
-		_ = a.Pool.QueryRow(ctx, `
-			SELECT count(*) FROM settlement_allocation pa
-			JOIN transaction_split s ON s.id = pa.split_id
-			WHERE s.transaction_id = $1`, id).Scan(&n)
-		if n > 0 {
+	if target == "void" {
+		// D33 §C: voids go through the centralized void path — it writes
+		// the History row and cascades immediately to every synced copy
+		// in any household.
+		if err := a.voidTransaction(ctx, sess.UserID, hh, id); err != nil {
+			if !errors.Is(err, errAlreadyVoid) {
+				http.Error(w, "could not void the record.", http.StatusInternalServerError)
+			}
+			// errAlreadyVoid: redirected below with the friendly message.
 			http.Redirect(w, r, fmt.Sprintf("/txns/%d?msg=%s", id,
-				url.QueryEscape("Cannot change status: a payment already references this transaction's splits.")),
-				http.StatusSeeOther)
+				url.QueryEscape("A voided transaction cannot be changed.")), http.StatusSeeOther)
 			return
 		}
+		http.Redirect(w, r, fmt.Sprintf("/txns/%d?msg=%s", id,
+			url.QueryEscape("Status set to void.")), http.StatusSeeOther)
+		return
+	}
+	var n int
+	_ = a.Pool.QueryRow(ctx, `
+		SELECT count(*) FROM settlement_allocation pa
+		JOIN transaction_split s ON s.id = pa.split_id
+		WHERE s.transaction_id = $1`, id).Scan(&n)
+	if n > 0 {
+		http.Redirect(w, r, fmt.Sprintf("/txns/%d?msg=%s", id,
+			url.QueryEscape("Cannot change status: a payment already references this transaction's splits.")),
+			http.StatusSeeOther)
+		return
 	}
 	// D31 History (§B5): every status move is a history event, written in
 	// its own short transaction with the update.
@@ -1420,12 +1481,6 @@ func (a *App) handleTxnStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action, summary := "edited", "status "+cur+" → "+target
-	if target == "void" {
-		action = "voided"
-		if cur == "pending" {
-			summary = "voided"
-		}
-	}
 	name, hdate, hamount, accIDs, relIDs, err := a.txnHistorySnapshot(ctx, tx, hh, id)
 	if err != nil {
 		http.Error(w, "internal error", 500)

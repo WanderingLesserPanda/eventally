@@ -77,6 +77,17 @@ th.money { text-align: right; }
 .tag.pending { background: #fff4e0; color: #9a6b00; }
 .tag.approved { background: #e5f5ec; color: var(--ok); }
 .tag.void { background: #f2f2f2; color: #999; text-decoration: line-through; }
+/* D33: synced-record state (a synced copy counts in the budgets). */
+.tag.synced { background: #fbeee2; color: #9a4b00; }
+.tag.changed { background: transparent; color: #b45309; border: 1px solid #e9a15e; }
+.empty { padding: 1.4rem 0.4rem; }
+.empty h2 { margin-top: 0; }
+.sync-section { margin-top: 1.5rem; }
+.sync-section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; border-bottom: 2px solid var(--line); margin-bottom: 0.4rem; }
+.sync-section-head h2 { margin: 0; font-size: 1.05rem; }
+.sync-panel { background: #faf6f1; border: 1px solid #e8ddcf; border-radius: 10px; padding: 0.7rem 1rem 0.2rem; max-width: 640px; }
+.sync-legend { margin-top: 1.6rem; border-top: 1px solid var(--line); padding-top: 0.8rem; }
+.sync-legend ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
 .footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 2rem 0; }
 
 /* P3: transactions */

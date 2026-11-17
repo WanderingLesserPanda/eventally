@@ -1,0 +1,97 @@
+{{define "page/sync"}}
+{{$root := .}}
+<div class="card">
+  <div class="page-head">
+    <div>
+      <h1>From other households</h1>
+      <p class="muted small">Records from the households you belong to, ready to sync into <b>{{.HouseholdName}}</b> — they count in this household's budgets at your share.</p>
+    </div>
+  </div>
+
+  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+
+  {{if not .HasOther}}
+  <div class="empty">
+    <h2>No other households</h2>
+    <p class="muted">You belong to no other households, so there is nothing to sync from. <a href="/settings">Join another household</a> (or create one in Settings) and its syncable records will appear here.</p>
+  </div>
+  {{else}}
+  {{range .Sections}}
+  <div class="sync-section" x-data="{ open: null }">
+    <div class="sync-section-head">
+      <h2>{{.Name}} <span class="muted small">— other household</span></h2>
+      <span class="muted small">{{if .Rows}}{{len .Rows}} record(s) syncable for you{{else}}no syncable records{{end}}</span>
+    </div>
+    {{if .Rows}}
+    <table>
+      <tr><th>Date</th><th>Description</th><th>Category <span class="muted small">(in that household)</span></th><th class="money">My share</th><th>Status</th></tr>
+      {{range .Rows}}
+      <tr>
+        <td>{{date .Date}}</td>
+        <td>{{.Description}}</td>
+        <td>{{orDash .CategoryName}}</td>
+        <td class="money">{{money .Share}}</td>
+        <td class="row-actions">
+          {{if .Synced}}<a class="tag synced" href="/txns/{{.LocalTxnID}}">synced ✓</a>{{end}}
+          {{if .SourceChanged}}<span class="tag changed">source changed</span>{{end}}
+          {{if or (not .Synced) .SourceChanged}}
+          <button type="button" class="btn small sync-toggle"
+                  @click="open = (open === {{.SrcTxnID}}) ? null : {{.SrcTxnID}}">
+            {{if .Synced}}Re-sync{{else}}Sync{{end}}
+          </button>
+          {{end}}
+        </td>
+      </tr>
+      {{if or (not .Synced) .SourceChanged}}
+      <tr x-show="open === {{.SrcTxnID}}" x-cloak>
+        <td colspan="5">
+          <form method="post" action="/sync" class="sync-panel">
+            {{template "csrf" $root}}
+            <input type="hidden" name="source_household_id" value="{{.SrcHouseholdID}}">
+            <input type="hidden" name="source_txn_id" value="{{.SrcTxnID}}">
+            <p class="muted small"><b>{{if .Synced}}Re-sync{{else}}Sync into {{$.HouseholdName}}{{end}}</b> — pick the category it counts against{{if .Synced}} (your current classification is preselected and kept){{end}}.</p>
+            <div class="form-grid">
+              <label>Category <span style="color:var(--danger)">*</span>
+                <select name="category_id" required>
+                  <option value="">— choose —</option>
+                  {{$c := .LocalCat}}{{range $.Cats}}
+                  <option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $c)}}selected{{end}}>{{if .Parent}}({{.Parent}}) {{end}}{{.Name}}</option>
+                  {{end}}
+                </select>
+              </label>
+              <label>Merchant <span class="muted small">optional</span>
+                <select name="merchant_id">
+                  <option value="">— none —</option>
+                  {{$m := .LocalMerch}}{{range $.Merchants}}
+                  <option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $m)}}selected{{end}}>{{.Name}}</option>
+                  {{end}}
+                </select>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">{{if .Synced}}Re-sync record{{else}}Sync record{{end}}</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+      {{end}}
+    </table>
+    {{else}}
+    <p class="muted">No syncable records in {{.Name}} — an expense shows up here when you hold a split share &gt; 0 in it.</p>
+    {{end}}
+  </div>
+  {{end}}
+
+  <div class="sync-legend">
+    <b>How it reads</b>
+    <ul class="muted small">
+      <li><span class="tag synced">synced ✓</span> — counts in this household's budgets (your share only), under your category</li>
+      <li><span class="tag changed">source changed</span> — the source record's amount or date moved; re-sync to refresh</li>
+      <li>listed = your syncable records only: expenses where you hold a split share &gt; 0 (unvoided)</li>
+      <li>the source household's own <b>/txns</b> is unchanged — it sees no synced state of its own</li>
+    </ul>
+  </div>
+  {{end}}
+</div>
+{{end}}

@@ -93,6 +93,12 @@ func (a *App) render(w http.ResponseWriter, r *http.Request, status int, name st
 	if s := sessionFromContext(r.Context()); s != nil && s.HasHousehold() {
 		if ms := a.switchHouseholds(r.Context()); len(ms) > 0 {
 			data["Switcher"] = ms
+			// D33: the "From other households" nav item — hidden for
+			// members with no other household (reaching /sync directly
+			// still renders the empty state).
+			if len(ms) > 1 {
+				data["SyncNav"] = true
+			}
 		}
 		if name, err := householdName(r.Context(), a.Pool, s.Household); err == nil {
 			data["HouseholdName"] = name

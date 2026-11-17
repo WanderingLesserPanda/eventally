@@ -16,6 +16,7 @@
     <a href="/" class="{{if eq .Path "/"}}active{{end}}">Dashboard</a>
     <a href="/capture" class="{{if hasPrefix .Path "/capture"}}active{{end}}">Capture</a>
     <a href="/txns">Transactions</a>
+    {{if .SyncNav}}<a href="/sync" class="{{if eq .Path "/sync"}}active{{end}}">From other households</a>{{end}}
     <a href="/cards">Cards</a>
     <a href="/reconcile">Reconcile</a>
     <a href="/recurring">Recurring</a>

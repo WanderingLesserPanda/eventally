@@ -143,6 +143,11 @@ func (a *App) Router() http.Handler {
 		authed.Get("/history", a.handleHistory)
 		authed.Post("/history/clear", a.handleHistoryClear)
 
+		// D33: cross-household synced records (Live view + the sync
+		// action). The three named cross-household surfaces of the wave.
+		authed.Get("/sync", a.handleSyncGET)
+		authed.Post("/sync", a.handleSyncPOST)
+
 		// Phase P4: quick capture (mobile-first, D12) — a few taps to a
 		// pending transaction.
 		authed.Get("/capture", a.captureGET)
