@@ -949,6 +949,7 @@ type txnLine struct {
 	FromTo    string
 	Status    string
 	Synced    bool // D33: a synced copy (source='sync') — the "synced ✓" badge
+	SyncedBy  []string // D33 follow-up: A-side chip — members who synced a copy elsewhere
 }
 
 type listFilters struct {
@@ -1072,6 +1073,20 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 			l.FromTo = from + " → " + to
 		}
 		list = append(list, l)
+	}
+
+	// D33 follow-up: the A-side badge — who synced a copy of each rendered
+	// record into another household (render-time only; un-syncing a copy
+	// removes the annotation, nothing is stored on the A side).
+	if len(list) > 0 {
+		ids := make([]int64, 0, len(list))
+		for _, l := range list {
+			ids = append(ids, l.ID)
+		}
+		by := a.aSyncedBy(ctx, hh, ids)
+		for i := range list {
+			list[i].SyncedBy = by[list[i].ID]
+		}
 	}
 
 	var dlOp int64
@@ -1229,6 +1244,7 @@ type txnDetail struct {
 	Status       string
 	Source       string
 	Synced       bool // D33: a synced copy (source='sync') — the detail badge
+	SyncedBy     []string // D33 follow-up: A-side "synced by" lines (source side only)
 	RecordedBy   string
 	Splits       []splitLine
 	HasAllocs    bool
@@ -1306,6 +1322,7 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	t.Merchant, t.Category = merch, cat
 	t.Synced = t.Source == "sync"
+	t.SyncedBy = a.aSyncedBy(ctx, hh, []int64{id})[id]
 	t.Charged = charged
 	if orig != 0 {
 		t.Original = trimNum(orig) + " " + charged

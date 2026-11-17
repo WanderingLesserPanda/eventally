@@ -75,7 +75,7 @@
       <td>{{orDash .Category}}</td>
       <td class="money">{{money .Total}}</td>
       <td>{{orDash .FromTo}}</td>
-      <td><span class="tag">{{.Status}}</span>{{if .Synced}}<span class="tag synced">synced ✓</span>{{end}}</td>
+      <td><span class="tag">{{.Status}}</span>{{if .Synced}}<span class="tag synced">synced ✓</span>{{end}}{{range .SyncedBy}}<span class="tag a-synced">synced by {{.}}</span>{{end}}</td>
       <td class="row-actions"><a class="btn small" href="/txns/{{.ID}}">Open</a></td>
     </tr>
     {{end}}

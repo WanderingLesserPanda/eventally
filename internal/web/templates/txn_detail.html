@@ -19,6 +19,7 @@
     {{if $t.Category}}<tr><th>Category</th><td>{{$t.Category}}</td></tr>{{end}}
     <tr><th>From → to</th><td>{{orDash $t.OriginLabel}} → {{orDash $t.DestLabel}}</td></tr>
     <tr><th>Status</th><td><span class="tag">{{$t.Status}}</span>{{if $t.Synced}}<span class="tag synced">synced ✓</span>{{end}}</td></tr>
+    {{range $i, $n := $t.SyncedBy}}<tr><th>Synced by</th><td><span class="tag a-synced">synced by {{$n}}</span></td></tr>{{end}}
     {{if $t.Source}}<tr><th>Source</th><td class="muted small">{{$t.Source}}</td></tr>{{end}}
     {{if $t.RecordedBy}}<tr><th>Recorded by</th><td class="muted small">{{$t.RecordedBy}}</td></tr>{{end}}
     {{if $t.Notes}}<tr><th>Notes</th><td>{{$t.Notes}}</td></tr>{{end}}

@@ -1,9 +1,10 @@
 # D33 — Cross-household synced records
 
 Status: **SHIPPED** (decisions signed off 2026-11-17; implemented exactly as
-signed — migration 000017, the centralized sync upsert, the three named
+signed — migration 000017, the centralized sync upsert, the named
 cross-household surfaces, void cascade, edit lock, verification per the
-section below).
+section below). 2026-11-17 follow-up (same day, signed): the A-side
+"synced by [member]" badge — a fourth named cross-household read.
 Scope: a member who belongs to several households syncs, one record at a time,
 their share of a related record from another household into the current
 household, where it counts against the current household's category budgets
@@ -182,12 +183,17 @@ Consequences of the shape (each verified against the current code):
 
 The wave adds exactly three named, centralized cross-household surfaces:
 the `/sync` GET handler (read), the `/sync` POST handler (read), and the
-void-path cascade (write). The extended D30-style probe asserts:
+void-path cascade (write). The 2026-11-17 follow-up adds a fourth — the
+A-side badge read (`aSyncedBy` in sync.go: the copy rows' `sync_source_*`
+pointers + `recorded_by_user_id` only; the target household's name is
+never selected, so an A-only member cannot learn where the copy went).
+The extended D30-style probe asserts:
 
-- no B-context query touches another household's tables outside those three
-  handlers;
+- no B-context query touches another household's tables outside those named
+  surfaces;
 - no source-household-context query touches the current household's tables
-  at all (the A-side badge being parked, the source side sees nothing new);
+  at all (the source side's only new content is the A-side badge itself,
+  which names members, never households);
 - the visibility negatives hold: a non-syncer member in Related mode cannot
   see the synced row on /txns; a member with no other household gets an
   empty /sync; non-syncable related records never list.
@@ -247,10 +253,10 @@ treats a synced row as any other B row — no new leak path is introduced.
   queue (auto-synced records land `pending` for the user to approve). Seams
   kept by this design: the single centralized sync upsert, the
   `source='sync'` + pointer columns, the existing pending workflow.
-- **A-side badge** ("synced by [member]" on the source record) — the user
-  regards it as important; parked for a later wave. It would need exactly
-  one named cross-household read (or an A-side flag) and an isolation-probe
-  extension.
+- **A-side badge** ("synced by [member]" on the source record) — **done**
+  in the 2026-11-17 follow-up (one named cross-household read, `aSyncedBy`,
+  + the isolation-probe extension it required; member name only, never the
+  target household's name; render-time, so un-syncing a copy removes it).
 - **A running balance between households** ("what the other household owes
   me") — the old who-owes-whom idea; a separate future feature.
 - Multi-currency (both households are MYR; D13/D18 policy unchanged).

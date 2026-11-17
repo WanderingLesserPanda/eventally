@@ -79,6 +79,7 @@ th.money { text-align: right; }
 .tag.void { background: #f2f2f2; color: #999; text-decoration: line-through; }
 /* D33: synced-record state (a synced copy counts in the budgets). */
 .tag.synced { background: #fbeee2; color: #9a4b00; }
+.tag.a-synced { background: #f2f4f8; color: var(--muted); }
 .tag.changed { background: transparent; color: #b45309; border: 1px solid #e9a15e; }
 .empty { padding: 1.4rem 0.4rem; }
 .empty h2 { margin-top: 0; }

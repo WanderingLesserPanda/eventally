@@ -849,11 +849,140 @@ func TestD33UnsyncFreesPointer(t *testing.T) {
 	}
 }
 
+// TestD33ASideBadge: the source-side "synced by [member]" annotation
+// (D33 follow-up, signed 2026-11-17). A-side list + detail only; visible to
+// every member of A who can see the record; multiple destinations →
+// multiple chips; un-sync removes it (render-time, nothing stored on the A
+// side); the target household's name never appears in A's rendering.
+func TestD33ASideBadge(t *testing.T) {
+	a, pool := d33App(t)
+	s := d33BuildSeed(t, pool)
+	ctx := context.Background()
+	sessU := &auth.Session{ID: "u", Household: s.H1, UserID: s.U}
+	sessF := &auth.Session{ID: "f", Household: s.H2, UserID: s.F}
+
+	// A third household, so the same source record can be synced into two
+	// of the members' other households by two different members.
+	var h3 int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO household (name, base_currency, language, first_day_of_week)
+		 VALUES ('Third household','MYR','en',1) RETURNING id`).Scan(&h3); err != nil {
+		t.Fatalf("h3: %v", err)
+	}
+	member3 := func(u int64, role string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO household_member (user_id, household_id, role) VALUES ($1,$2,$3)`,
+			u, h3, role); err != nil {
+			t.Fatalf("membership %d→h3: %v", u, err)
+		}
+	}
+	member3(s.F, "owner")
+	member3(s.U, "member")
+	var cat3 int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO category (household_id, name, parent_id, transaction_class, is_budgetable)
+		 VALUES ($1,'Coffee',NULL,'expense',true) RETURNING id`, h3).Scan(&cat3); err != nil {
+		t.Fatalf("h3 category: %v", err)
+	}
+
+	d33SyncPOST(t, a, ctx, sessU, s.H2, s.T1, s.CatCoffee, 0) // T1 → H1 by U
+	// The sync target is the session's current household: F acts in H3,
+	// source H2.
+	sessF3 := &auth.Session{ID: "f3", Household: h3, UserID: s.F}
+	d33SyncPOST(t, a, ctx, sessF3, s.H2, s.T1, cat3, 0)        // T1 → H3 by F
+
+	get := func(sess *auth.Session) string {
+		t.Helper()
+		r := httptest.NewRequest("GET", "/txns", nil)
+		r = r.WithContext(contextWithSession(r.Context(), sess))
+		rec := httptest.NewRecorder()
+		a.listTxns(rec, r)
+		if rec.Code != http.StatusOK {
+			body := rec.Body.String()
+			t.Fatalf("GET /txns: status %d, body %q", rec.Code, body[:min(len(body), 200)])
+		}
+		return rec.Body.String()
+	}
+
+	// A-side list (H2, viewed by F): both chips; the household name of the
+	// H1 sync target must NOT appear (F holds no H1 membership, so
+	// 'Main household' appears nowhere else on the page). 'Third
+	// household' does appear — in F's own nav switcher — so it is not
+	// asserted.
+	bodyF := get(sessF)
+	if !strings.Contains(bodyF, "synced by u_u") || !strings.Contains(bodyF, "synced by u_f") {
+		t.Fatalf("F H2 /txns chips missing:\n%s", bodyF)
+	}
+	if strings.Contains(bodyF, "Main household") {
+		t.Fatalf("F H2 /txns leaked the target household name:\n%s", bodyF)
+	}
+
+	// A-side list (H2, viewed by U — the other member of A). U belongs to
+	// both sync targets, so both household names appear in U's own nav
+	// switcher anyway; only the chips are asserted. The badge belongs on
+	// the source row — the H1 copy row carries the "synced ✓" tag instead
+	// (asserted in TestD33DetailVisibility / the smoke), never the chip.
+	sessU2 := &auth.Session{ID: "u2", Household: s.H2, UserID: s.U}
+	if body := get(sessU2);
+		!strings.Contains(body, "synced by u_u") || !strings.Contains(body, "synced by u_f") {
+		t.Fatalf("U H2 /txns missing the chips:\n%s", body)
+	}
+
+	// Detail pages: the source row (H2) carries the chips; the copy (H1)
+	// keeps its "synced ✓" tag and shows no A-side chip.
+	var copyID int64
+	if err := pool.QueryRow(ctx, `
+		SELECT id FROM "transaction"
+		WHERE household_id = $1 AND sync_source_household_id = $2 AND sync_source_txn_id = $3`,
+		s.H1, s.H2, s.T1).Scan(&copyID); err != nil {
+		t.Fatalf("copy row: %v", err)
+	}
+	getDetail := func(sess *auth.Session, id int64) string {
+		t.Helper()
+		r := httptest.NewRequest("GET", "/txns/"+strconv.FormatInt(id, 10), nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", strconv.FormatInt(id, 10))
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+		r = r.WithContext(contextWithSession(r.Context(), sess))
+		rec := httptest.NewRecorder()
+		a.handleTxnDetail(rec, r)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("detail: status %d", rec.Code)
+		}
+		return rec.Body.String()
+	}
+	if body := getDetail(sessF, s.T1);
+		!strings.Contains(body, "synced by u_u") || !strings.Contains(body, "synced by u_f") {
+		t.Fatalf("F T1 detail missing the chips:\n%s", body)
+	}
+	if body := getDetail(sessU, copyID);
+		!strings.Contains(body, "synced ✓") || strings.Contains(body, "synced by") {
+		t.Fatalf("U copy detail: want the synced tag only, got:\n%s", body)
+	}
+
+	// Un-sync (the existing bulk-delete path) removes the chip — the H1
+	// copy goes, the H3 copy stays, so exactly one chip remains.
+	rec := httptest.NewRecorder()
+	a.handleBulkDelete(rec, d30Req(t, ctx, sessU, "/txns/bulk-delete", 0,
+		url.Values{"ids[]": {strconv.FormatInt(copyID, 10)}}))
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("bulk delete: status %d body %q", rec.Code, rec.Body.String())
+	}
+	bodyF2 := get(sessF)
+	if strings.Contains(bodyF2, "synced by u_u") {
+		t.Fatalf("chip survived the un-sync:\n%s", bodyF2)
+	}
+	if !strings.Contains(bodyF2, "synced by u_f") {
+		t.Fatalf("the H3 chip must remain:\n%s", bodyF2)
+	}
+}
+
 // TestD33IsolationProbe is the extended D30-style probe: (static) the
 // source pointers are the only cross-household bridge and only sync.go
-// touches them; (behavioral) no query crosses households outside the three
-// named surfaces — the source household's side sees nothing new, and
-// non-syncable involvement never appears.
+// touches them; (behavioral) no query crosses households outside the four
+// named surfaces — the source household's side shows the A-side badge
+// only, and non-syncable involvement never appears.
 func TestD33IsolationProbe(t *testing.T) {
 	a, pool := d33App(t)
 	s := d33BuildSeed(t, pool)
@@ -916,11 +1045,15 @@ func TestD33IsolationProbe(t *testing.T) {
 		t.Fatal("M (one household) sees the From-other-households nav item")
 	}
 
-	// F's source-side /txns sees nothing new: no synced badge, and the
-	// other household's name never leaks into H2's rendering.
+	// F's source-side /txns shows the A-side badge (the fourth named
+	// surface) but no B-side tag — and the other household's name never
+	// leaks into H2's rendering.
 	if body := page(sessF, "/txns");
 		strings.Contains(body, "synced ✓") || strings.Contains(body, "Main household") {
 		t.Fatalf("F's H2 /txns leaked cross-household state:\n%s", body)
+	}
+	if body := page(sessF, "/txns"); !strings.Contains(body, "synced by u_u") {
+		t.Fatalf("F's H2 /txns missing the A-side badge:\n%s", body)
 	}
 
 	// U's Live view lists T1 only — T2 (recorded, no split) and T3

@@ -9,7 +9,8 @@
 #   1.  nav-link visibility per membership (U sees it; P, M, F don't)
 #   2.  /sync GET rows + states (T1 syncable; T2 recorded-only, T3 leg-funded
 #       do not appear)
-#   3.  POST /sync end-to-end (row appears on /txns for U and P, absent for M)
+#   3.  POST /sync end-to-end (row appears on /txns for U and P, absent for M;
+#       A-side "synced by" badge on the H2 source row, no household leak)
 #   4.  dashboard card numbers (Coffee actuals include 6.00 for U, not M)
 #   5.  duplicate POST no-op (exactly one row per source pointer)
 #   6.  edit-lock: amount change 400; category change allowed
@@ -227,6 +228,11 @@ not_has m /txns 'coffee beverage'
 
 SYNCID="$(sql "SELECT id FROM \"transaction\" WHERE household_id=1 AND sync_source_household_id=2 AND sync_source_txn_id=$T1")"
 [[ -n "$SYNCID" ]] || fail "synced row not found in H1"
+# A-side badge on the source row (H2, viewed by F): the syncing member's
+# name only. F holds no H1 membership, so 'Main household' must not appear
+# anywhere on the page (the leak rule).
+has f /txns 'synced by U'
+not_has f /txns 'Main household'
 
 echo "==> 4. dashboard card numbers (Food & Drink roll-up)"
 page u / | grep -Pzoz '(?s)Food &amp; Drink.{0,400}?6\.00' >/dev/null || fail "U dashboard: Food & Drink actuals missing 6.00"
@@ -295,6 +301,8 @@ code="$(post u /txns/bulk-delete --csrf-src=/ --data-urlencode "ids[]=$SYNCID")"
 out="$(sql "SELECT outcome FROM deletion_log WHERE household_id=1 AND txn_id=$SYNCID")"
 [[ "$out" == "deleted" ]] || fail "deletion_log: '$out', want deleted"
 [[ -z "$(sql "SELECT id FROM \"transaction\" WHERE id=$SYNCID")" ]] || fail "row still present"
+# The A-side badge is render-time: with the copy gone, no chip remains.
+not_has f /txns 'synced by'
 
 echo "==> 9. re-sync after delete, then void cascade"
 code="$(post u /sync --data-urlencode "source_household_id=2" \

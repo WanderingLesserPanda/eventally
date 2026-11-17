@@ -16,6 +16,10 @@
 //     pointing at it is voided in the same transaction, each with a
 //     standard History row (actor = whoever voided the source; no reason
 //     field — D31 convention).
+//  4. The A-side badge read (aSyncedBy, D33 follow-up signed 2026-11-17):
+//     for records rendered in household A, WHO synced a copy of each into
+//     another household. Render-time only; the badge names the syncing
+//     member only and never the target household's name.
 //
 // A synced record is an ordinary "transaction" row in the current
 // household on the source household's party endpoint (type='organisation',
@@ -33,6 +37,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -621,5 +626,86 @@ func formInt64(r *http.Request, name string) (int64, error) {
 		return 0, nil
 	}
 	return strconv.ParseInt(s, 10, 64)
+}
+
+// aSyncedBy is the fourth named cross-household surface (D33 follow-up,
+// signed 2026-11-17): for the records being rendered in household A, the
+// members who synced a copy of each into another household — the source
+// side's "synced by [member]" chip.
+//
+// Render-time only: nothing is stored on the A side, so un-syncing a copy
+// removes the annotation with no tombstone (the un-sync trace lives in the
+// target household's deletion log).
+//
+// Leak rule: the badge names the syncing MEMBER only. The query reads just
+// the copy rows' sync pointers + recorded_by_user_id; it must never SELECT
+// the target household's name or any target-household party name (an
+// A-only member must not learn where the copy went).
+func (a *App) aSyncedBy(ctx context.Context, hh int64, ids []int64) map[int64][]string {
+	out := map[int64][]string{}
+	if len(ids) == 0 {
+		return out
+	}
+	rows, err := a.Pool.Query(ctx, `
+		SELECT c.sync_source_txn_id, c.recorded_by_user_id
+		FROM "transaction" c
+		WHERE c.sync_source_household_id = $1
+		  AND c.sync_source_txn_id = ANY($2)`, hh, ids)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	perSrc := map[int64][]int64{}
+	actors := map[int64]struct{}{}
+	for rows.Next() {
+		var src, actor int64
+		if err := rows.Scan(&src, &actor); err != nil {
+			continue
+		}
+		perSrc[src] = append(perSrc[src], actor)
+		actors[actor] = struct{}{}
+	}
+	if len(actors) == 0 {
+		return out
+	}
+	var actorIDs []int64
+	for id := range actors {
+		actorIDs = append(actorIDs, id)
+	}
+	sort.Slice(actorIDs, func(i, j int) bool { return actorIDs[i] < actorIDs[j] })
+	names := map[int64]string{}
+	rows2, err := a.Pool.Query(ctx, `
+		SELECT id, COALESCE(NULLIF(display_name, ''), username)
+		FROM app_user WHERE id = ANY($1)`, actorIDs)
+	if err != nil {
+		return out
+	}
+	defer rows2.Close()
+	for rows2.Next() {
+		var id int64
+		var n string
+		if err := rows2.Scan(&id, &n); err != nil {
+			continue
+		}
+		names[id] = n
+	}
+	for src, acts := range perSrc {
+		sort.Slice(acts, func(i, j int) bool { return acts[i] < acts[j] })
+		seen := map[int64]struct{}{}
+		var chip []string
+		for _, act := range acts {
+			if _, dup := seen[act]; dup {
+				continue
+			}
+			seen[act] = struct{}{}
+			if n, ok := names[act]; ok && n != "" {
+				chip = append(chip, n)
+			}
+		}
+		if len(chip) > 0 {
+			out[src] = chip
+		}
+	}
+	return out
 }
 
