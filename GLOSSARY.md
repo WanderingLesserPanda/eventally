@@ -110,6 +110,48 @@ tombstone; no automatic expiry. Deletions are NOT in History — they live in
 the Deletion log.
 _Avoid_: audit log (the D30-era name for this same idea), activity feed
 
+### Budget
+
+**Budget**:
+A household's monthly allocation for a category (on the category; a parent
+collects its subtree). Display-only: the dashboard shows current-month
+actual-vs-budget per top-level category. A budget is household property — it
+lives on categories, and categories belong to a household.
+_Avoid_: spending limit, cap, personal budget
+
+**Personal budget**:
+A budget tied to a user rather than a household: the user's own monthly limit
+measured against the user's share of spend across every household they belong
+to. Parked as an Open Item (not implemented) — household budgets are the
+budget concept for now.
+_Avoid_: user budget (ambiguous with a household budget the user edits)
+
+### Cross-household
+
+**Source household**:
+The household a synced record came from. A synced record's origin is a party
+row representing the source household (named after it), so the row carries
+its provenance.
+_Avoid_: origin household (ambiguous with a transaction's origin endpoint),
+the other household
+
+**Live view**:
+The page listing a logged-in member's syncable records from the other
+households they belong to — expense records in which they hold a split
+share — with sync state and the sync action.
+_Avoid_: foreign view, cross-household list, mirror (suggests a syncing
+copy)
+
+**Synced record**:
+A record in the current household created by syncing one of a member's
+related records from a source household. Its money facts (amount = the
+syncing member's share, date) are locked to the source at sync time; its
+category and merchant are the current household's own and freely editable.
+It counts in the current household's category budgets and cannot be funded
+by a settlement.
+_Avoid_: mirror, import (the P8 data migration — a different thing,
+`source='import'`), foreign record
+
 ### Account lifecycle
 
 **Archived account**:
