@@ -1,7 +1,9 @@
 # D33 — Cross-household synced records
 
-Status: **DESIGNED — awaiting sign-off** (grill-with-docs session 2026-11-16,
-four rounds).
+Status: **SHIPPED** (decisions signed off 2026-11-17; implemented exactly as
+signed — migration 000017, the centralized sync upsert, the three named
+cross-household surfaces, void cascade, edit lock, verification per the
+section below).
 Scope: a member who belongs to several households syncs, one record at a time,
 their share of a related record from another household into the current
 household, where it counts against the current household's category budgets
