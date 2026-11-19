@@ -1,0 +1,77 @@
+{{define "page/review_bulk_modal"}}
+{{$root := .}}
+<div class="card">
+  <div class="page-head">
+    <h1>Approve selected records</h1>
+    <div class="row-actions">
+      <a class="btn" href="/review">Cancel — approve nothing</a>
+    </div>
+  </div>
+
+  {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+  {{if .Err}}<div class="error">{{.Err}}</div>{{end}}
+
+  <p class="muted small">One all-or-nothing commit: confirming approves every row below; cancelling approves
+  nothing. The synced records below pick the category they count against — the other rows approve as-is.</p>
+
+  <h2>Synced records — pick the category each counts against</h2>
+  <table>
+    <tr><th>Date</th><th>What</th><th>Category <span style="color:var(--danger)">*</span></th><th class="money">Amount</th><th>By</th></tr>
+    {{range .SyncRows}}
+    <tr>
+      <td>{{date .Date}}</td>
+      <td><a href="/txns/{{.ID}}">{{.Label}}</a></td>
+      <td>
+        <select name="cat_{{.ID}}" required>
+          <option value="">— choose —</option>
+          {{$c := .CatID}}{{range $.Cats}}
+          <option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $c)}}selected{{end}}>{{if .Parent}}({{.Parent}}) {{end}}{{.Name}}</option>
+          {{end}}
+        </select>
+      </td>
+      <td class="money">{{money .Total}}</td>
+      <td>{{orDash .RecordedBy}}</td>
+    </tr>
+    {{end}}
+  </table>
+
+  <h2>Approved as-is</h2>
+  {{if .StraightRows}}
+  <table>
+    <tr><th>Date</th><th>What</th><th>Category</th><th class="money">Amount</th><th>By</th></tr>
+    {{range .StraightRows}}
+    <tr>
+      <td>{{date .Date}}</td>
+      <td><a href="/txns/{{.ID}}">{{.Label}}</a></td>
+      <td>{{.Category}}</td>
+      <td class="money">{{money .Total}}</td>
+      <td>{{orDash .RecordedBy}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="muted">None — every selected row is a synced record.</p>
+  {{end}}
+
+  {{if .Skipped}}
+  <div class="flash">
+    <b>Not committed (no category):</b>
+    {{range $i, $l := .Skipped}}{{if $i}}, {{end}}<a href="/txns/{{$l.ID}}">{{$l.Label}}</a>{{end}}
+    — approve each individually on its record page.
+  </div>
+  {{end}}
+  {{if .LockedN}}<div class="flash"><b>{{.LockedN}} skipped</b> — a payment references their splits.</div>{{end}}
+  {{if .DeniedN}}<div class="flash"><b>{{.DeniedN}} skipped</b> — no edit permission.</div>{{end}}
+
+  <form method="post" action="/review/bulk">
+    {{template "csrf" $root}}
+    <input type="hidden" name="phase" value="confirm">
+    <input type="hidden" name="status" value="approved">
+    {{range .IDs}}<input type="hidden" name="id[]" value="{{.}}">{{end}}
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">Confirm — approve {{add (len .SyncRows) (len .StraightRows)}} record(s)</button>
+      <a class="btn" href="/review">Cancel — approve nothing</a>
+    </div>
+  </form>
+</div>
+{{end}}

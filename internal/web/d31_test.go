@@ -363,8 +363,8 @@ func TestD31BackfillEquivalence(t *testing.T) {
 	if err := goose.Up(sqlDB, "migrations"); err != nil {
 		t.Fatalf("apply 000016: %v", err)
 	}
-	if n := q(`SELECT max(version_id) FROM goose_db_version`); n != 17 {
-		t.Fatalf("version = %d, want 17", n)
+	if n := q(`SELECT max(version_id) FROM goose_db_version`); n != 18 {
+		t.Fatalf("version = %d, want 18", n)
 	}
 	// One leg per settlement, exactly.
 	if n := q(`SELECT count(*) FROM settlement_funding`); n != 2 {
@@ -498,7 +498,8 @@ func TestD31PermissionMatrix(t *testing.T) {
 
 // d31TxnForm builds a minimal /txns create/edit form: an expense from an
 // account to the recorder's party (destParty), one equal split to `user`.
-func d31TxnForm(t *testing.T, user int64, total, desc string, origin, destParty int64) url.Values {
+// D34: a category is required at creation, so catID is carried (any level).
+func d31TxnForm(t *testing.T, user int64, total, desc string, origin, destParty, catID int64) url.Values {
 	t.Helper()
 	form := url.Values{}
 	form.Set("class", "expense")
@@ -508,6 +509,9 @@ func d31TxnForm(t *testing.T, user int64, total, desc string, origin, destParty 
 	form.Set("split_mode", "equal")
 	form.Set("origin_ref", fmt.Sprintf("account:%d", origin))
 	form.Set("destination_ref", fmt.Sprintf("party:%d", destParty))
+	if catID > 0 {
+		form.Set("category_id", fmt.Sprintf("%d", catID))
+	}
 	form.Set("part_key[]", fmt.Sprintf("user:%d", user))
 	form.Set("part_value[]", "")
 	return form
@@ -531,6 +535,12 @@ func TestD31HistoryTrail(t *testing.T) {
 	// uA works on AccA, uB on AccB; no cross-grants (per-row visibility).
 	d30Grant(t, pool, hh, uA, accA, "All", "All")
 	d30Grant(t, pool, hh, uB, accB, "All", "All")
+	// D34: every record carries a category at creation (any level).
+	var catID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO category (household_id, name) VALUES ($1,'D31H Misc') RETURNING id`, hh).Scan(&catID); err != nil {
+		t.Fatalf("category: %v", err)
+	}
 
 	histOf := func(txn int64) int64 {
 		t.Helper()
@@ -551,7 +561,7 @@ func TestD31HistoryTrail(t *testing.T) {
 	recA := &auth.Session{ID: "d31ha", Household: hh, UserID: uA}
 	rec := httptest.NewRecorder()
 	a.handleTxnCreate(rec, d30Req(t, ctx, recA, "/txns/new", 0,
-		d31TxnForm(t, uA, "100.00", "D31H A", accA, uAParty)))
+		d31TxnForm(t, uA, "100.00", "D31H A", accA, uAParty, catID)))
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("txn create: status %d body %q", rec.Code, rec.Body.String())
 	}
@@ -579,7 +589,7 @@ func TestD31HistoryTrail(t *testing.T) {
 
 	// uA edits the amount -> an 'edited' row with a before→after diff.
 	{
-		form := d31TxnForm(t, uA, "120.00", "D31H A edited", accA, uAParty)
+		form := d31TxnForm(t, uA, "120.00", "D31H A edited", accA, uAParty, catID)
 		rec = httptest.NewRecorder()
 		a.handleTxnEditPost(rec, d30Req(t, ctx, recA, "/txns/edit", txnA, form))
 		if rec.Code != http.StatusSeeOther {

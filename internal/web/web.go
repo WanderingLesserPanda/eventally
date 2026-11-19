@@ -148,6 +148,16 @@ func (a *App) Router() http.Handler {
 		authed.Get("/sync", a.handleSyncGET)
 		authed.Post("/sync", a.handleSyncPOST)
 
+		// D34: auto-sync + detach (ADR-0007/0008). The per-member
+		// auto-sync toggle (one setting, two UI homes), the B-side
+		// detach action, and the category-mapping CRUD (the caller's own
+		// rules — household-local).
+		authed.Post("/sync/auto", a.handleSyncAutoPOST)
+		authed.Post("/txns/{id}/detach", a.handleTxnDetach)
+		authed.Post("/settings/mapping", a.handleMappingCreate)
+		authed.Post("/settings/mapping/{id}", a.handleMappingUpdate)
+		authed.Post("/settings/mapping/{id}/delete", a.handleMappingDelete)
+
 		// Phase P4: quick capture (mobile-first, D12) — a few taps to a
 		// pending transaction.
 		authed.Get("/capture", a.captureGET)

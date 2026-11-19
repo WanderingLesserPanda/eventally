@@ -6,6 +6,13 @@
     <h1>{{if eq $t.Class "expense"}}Expense{{else if eq $t.Class "income"}}Income{{else}}Transfer{{end}} — {{date $t.Date}}</h1>
     <div class="row-actions">
       <a class="btn" href="/txns/{{.T.ID}}/edit">Edit</a>
+      {{if $t.Detachable}}
+      <form method="post" action="/txns/{{$t.ID}}/detach" style="display:inline"
+            onsubmit="return confirm('Detach this record from its source? Amount and date no longer follow the source: the record becomes fully editable, source voids no longer reach it, and it stops counting as synced. You can re-link it later from the sync view.')">
+        {{template "csrf" $root}}
+        <button class="btn btn-danger">Detach from source</button>
+      </form>
+      {{end}}
       <a class="btn" href="/txns">← All transactions</a>
     </div>
   </div>
@@ -16,7 +23,7 @@
     </td></tr>
     {{if $t.Description}}<tr><th>Description</th><td>{{$t.Description}}</td></tr>{{end}}
     {{if $t.Merchant}}<tr><th>Merchant</th><td>{{$t.Merchant}}</td></tr>{{end}}
-    {{if $t.Category}}<tr><th>Category</th><td>{{$t.Category}}</td></tr>{{end}}
+    {{if $t.NoCat}}<tr><th>Category</th><td><span class="tag no-cat">no category</span></td></tr>{{else if $t.Category}}<tr><th>Category</th><td>{{$t.Category}}</td></tr>{{end}}
     <tr><th>From → to</th><td>{{orDash $t.OriginLabel}} → {{orDash $t.DestLabel}}</td></tr>
     <tr><th>Status</th><td><span class="tag">{{$t.Status}}</span>{{if $t.Synced}}<span class="tag synced">synced ✓</span>{{end}}</td></tr>
     {{range $i, $n := $t.SyncedBy}}<tr><th>Synced by</th><td><span class="tag a-synced">synced by {{$n}}</span></td></tr>{{end}}
@@ -71,6 +78,34 @@
   </details>
 
   <h2>Status</h2>
+  {{if and (eq $t.Status "pending") $t.NoCat}}
+  <div class="sync-panel" style="margin-bottom:0.8rem">
+    <p class="muted small">This record has <b>no category</b> — pick one to approve it (any level, same picker as the record form).</p>
+    <form method="post" action="/txns/{{$t.ID}}/status">
+      {{template "csrf" $root}}
+      <input type="hidden" name="status" value="approved">
+      <div class="form-grid">
+        <label>Category <span style="color:var(--danger)">*</span>
+          <select name="category_id" required>
+            <option value="">— choose —</option>
+            {{range $t.Cats}}
+            <option value="{{.ID}}">{{if .Parent}}({{.Parent}}) {{end}}{{.Name}}</option>
+            {{end}}
+          </select>
+        </label>
+      </div>
+      {{if $t.Synced}}
+      <label class="row" style="gap:.5rem">
+        <input type="checkbox" name="remember_mapping" value="on">
+        Remember this mapping (the source category → this category)
+      </label>
+      {{end}}
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Approve with category</button>
+      </div>
+    </form>
+  </div>
+  {{end}}
   {{range .Statuses}}
   {{if ne . $t.Status}}
   <form method="post" action="/txns/{{$t.ID}}/status" style="display:inline"

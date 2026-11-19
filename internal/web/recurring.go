@@ -25,6 +25,7 @@ import (
 	"github.com/WanderingLesserPanda/eventally/internal/money"
 	"github.com/WanderingLesserPanda/eventally/internal/split"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // RecurringLine is one row of the template list.
@@ -443,6 +444,16 @@ func (a *App) saveRecurring(w http.ResponseWriter, r *http.Request, hh, id int64
 	if c := r.FormValue("category_id"); c != "" {
 		f.CategoryID, _ = strconv.ParseInt(c, 10, 64)
 	}
+	// D34: the template's generated records must carry a category — the
+	// single shared rule, required at template creation (an edit keeps its
+	// pick; legacy templates without one stay as they are).
+	if id == 0 {
+		if err := categoryRequiredErr(f.CategoryID, f.Cats); err != nil {
+			f.Err = err.Error()
+			a.renderRecurringForm(w, r, f)
+			return
+		}
+	}
 	if acc := strings.TrimSpace(r.FormValue("account_id")); acc == "" {
 		f.Err = "Choose the account the charge lands on."
 		a.renderRecurringForm(w, r, f)
@@ -817,6 +828,21 @@ func (a *App) generateRecurringEntry(ctx context.Context, hh int64, d dueTemplat
 
 // --- pending-review queue (D9) ----------------------------------------------
 
+// reviewLine is one row of the pending-review queue (D9) and of the D34
+// bulk modal.
+type reviewLine struct {
+	ID         int64
+	Date       time.Time
+	Label      string
+	Category   string
+	CatID      int64
+	NoCat      bool // D34: no category — the explicit marker (legacy rows)
+	Synced     bool // D34: currently synced (is_synced) — the bulk modal lists these
+	Total      money.Money
+	Source     string
+	RecordedBy string
+}
+
 // handleReview lists pending transactions — the monthly review surface
 // (D9: entries get approved when the statement check happens).
 func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
@@ -833,7 +859,8 @@ func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT t.id, t.transaction_date, COALESCE(t.description,
 		       COALESCE(m.name, 'transaction')),
-		       COALESCE(c.name, ''), t.total_amount,
+		       COALESCE(t.category_id, 0), COALESCE(c.name, ''),
+		       t.total_amount, COALESCE(t.is_synced, false),
 		       COALESCE(t.source, 'manual'),
 		       COALESCE(u.display_name, '')
 		FROM "transaction" t
@@ -848,23 +875,17 @@ func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	type reviewLine struct {
-		ID           int64
-		Date         time.Time
-		Label        string
-		Category     string
-		Total        money.Money
-		Source       string
-		RecordedBy   string
-	}
 	var list []reviewLine
 	for rows.Next() {
 		var l reviewLine
-		if err := rows.Scan(&l.ID, &l.Date, &l.Label, &l.Category, &l.Total,
-			&l.Source, &l.RecordedBy); err != nil {
+		var catID int64
+		var catNameV string
+		if err := rows.Scan(&l.ID, &l.Date, &l.Label, &catID, &catNameV, &l.Total,
+			&l.Synced, &l.Source, &l.RecordedBy); err != nil {
 			http.Error(w, "scan pending: "+err.Error(), 500)
 			return
 		}
+		l.CatID, l.Category, l.NoCat = catID, catNameV, catID == 0
 		list = append(list, l)
 	}
 	a.render(w, r, 200, "review.html", map[string]any{
@@ -879,6 +900,18 @@ func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
 // one POST. The same guards as the single-row status change apply: a row
 // referenced by a payment allocation is skipped (and reported), never
 // force-changed.
+//
+// D34 (§B): approving a pending row without a category is rejected until
+// one is supplied. The BULK workflow (Q17 as revised): the category modal
+// surfaces ONLY when the selection includes ≥1 currently-synced record
+// (is_synced = true), and it lists ONLY those sync records (pre-filled
+// editable, missing blank + required, no save-as-mapping). Non-sync records
+// approve straight through (category unchanged); a non-sync row missing a
+// category (legacy only) is SKIPPED + REPORTED and is approved individually
+// via the single-row pop-up. Apply → the summary page; Confirm → one
+// all-or-nothing commit (cancel anywhere = nothing commits; skips are
+// reported, never silent). Void stays a safe reject (the one-way cascade
+// does the rest); there is no "reject and keep pending" state.
 func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sess := sessionFromContext(ctx)
@@ -904,8 +937,51 @@ func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Which of these already have payment allocations?
+	// Classify every selected id: row state (pending / synced / category),
+	// payment locks (skipped, reported), and the Edit grant (skipped,
+	// counted).
+	type rowState struct {
+		pending bool
+		synced  bool
+		catID   int64
+		label   string
+	}
+	states := map[int64]rowState{}
 	rows, err := a.Pool.Query(ctx, `
+		SELECT t.id, t.record_status, COALESCE(t.is_synced, false),
+		       COALESCE(t.category_id, 0),
+		       COALESCE(t.description, COALESCE(m.name, 'transaction'))
+		FROM "transaction" t
+		LEFT JOIN merchant m ON m.id = t.merchant_id
+		WHERE t.id = ANY($1) AND t.household_id = $2`, ids, hh)
+	if err != nil {
+		http.Error(w, "load selected: "+err.Error(), 500)
+		return
+	}
+	for rows.Next() {
+		var (
+			id    int64
+			st    string
+			sync  bool
+			cat   int64
+			label string
+		)
+		if err := rows.Scan(&id, &st, &sync, &cat, &label); err != nil {
+			rows.Close()
+			http.Error(w, "load selected: "+err.Error(), 500)
+			return
+		}
+		states[id] = rowState{pending: st == "pending", synced: sync, catID: cat, label: label}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		http.Error(w, "load selected: "+err.Error(), 500)
+		return
+	}
+	rows.Close()
+
+	// Which of these already have payment allocations?
+	allocRows, err := a.Pool.Query(ctx, `
 		SELECT s.transaction_id
 		FROM settlement_allocation pa
 		JOIN transaction_split s ON s.id = pa.split_id
@@ -915,24 +991,29 @@ func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	locked := map[int64]bool{}
-	for rows.Next() {
+	for allocRows.Next() {
 		var tid int64
-		if err := rows.Scan(&tid); err != nil {
-			rows.Close()
+		if err := allocRows.Scan(&tid); err != nil {
+			allocRows.Close()
 			http.Error(w, "check allocations: "+err.Error(), 500)
 			return
 		}
 		locked[tid] = true
 	}
-	rows.Close()
+	allocRows.Close()
 
 	// Only pending rows may change status here (the queue is pending-only),
 	// and only ones the caller holds an Edit grant on (Gate 5: a status move
-	// is an edit). Denied rows are skipped and counted.
-	denied := 0
-	var ok []int64
+	// is an edit).
+	denied, lockedN := 0, 0
+	var syncRows, straightRows, noCatRows []reviewLine
 	for _, id := range ids {
+		st, ok := states[id]
+		if !ok || !st.pending {
+			continue
+		}
 		if locked[id] {
+			lockedN++
 			continue
 		}
 		surface, inRel, err := a.txnAccess(ctx, hh, sess.UserID, id)
@@ -940,31 +1021,134 @@ func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "load access: "+err.Error(), 500)
 			return
 		}
-		if p.canEditTxn(surface, inRel) {
-			ok = append(ok, id)
-		} else {
+		if !p.canEditTxn(surface, inRel) {
 			denied++
+			continue
+		}
+		line := reviewLine{ID: id, Category: catName(ctx, a.Pool, hh, st.catID), CatID: st.catID,
+			NoCat: st.catID == 0, Synced: st.synced, Label: st.label}
+		switch {
+		case st.synced:
+			syncRows = append(syncRows, line)
+		case st.catID == 0:
+			noCatRows = append(noCatRows, line)
+		default:
+			straightRows = append(straightRows, line)
 		}
 	}
-	var n int64
-	if len(ok) > 0 {
-		res, err := a.Pool.Exec(ctx, `
-			UPDATE "transaction" SET record_status = $1
-			WHERE id = ANY($2) AND household_id = $3 AND record_status = 'pending'`,
-			target, ok, hh)
-		if err != nil {
-			http.Error(w, "bulk status: "+err.Error(), 500)
+
+	// Void: the safe reject — straight commit of the eligible rows; the
+	// one-way cascade reaches their synced copies.
+	if target == "void" {
+		var ok []int64
+		for _, id := range ids {
+			st, known := states[id]
+			if known && st.pending && !locked[id] && canEditForBulk(ctx, a, hh, sess.UserID, id, p) {
+				ok = append(ok, id)
+			}
+		}
+		var n int64
+		if len(ok) > 0 {
+			res, err := a.Pool.Exec(ctx, `
+				UPDATE "transaction" SET record_status = 'void'
+				WHERE id = ANY($1) AND household_id = $2 AND record_status = 'pending'`,
+				ok, hh)
+			if err != nil {
+				http.Error(w, "bulk status: "+err.Error(), 500)
+				return
+			}
+			n = res.RowsAffected()
+		}
+		msg := fmt.Sprintf("%d of %d selected transactions voided.", n, len(ids))
+		if lockedN > 0 {
+			msg += fmt.Sprintf(" %d skipped — a payment references their splits.", lockedN)
+		}
+		if denied > 0 {
+			msg += fmt.Sprintf(" %d skipped — no edit permission.", denied)
+		}
+		a.redirectReview(w, r, msg)
+		return
+	}
+
+	// Approve.
+	if r.FormValue("phase") != "confirm" {
+		if len(syncRows) == 0 {
+			// No synced record in the selection: straight commit of the
+			// rows that carry a category; legacy no-category rows are
+			// skipped + reported (approved individually on the record
+			// page).
+			_, err := a.reviewApproveTx(ctx, hh, sess.UserID, straightRows, nil)
+			if errors.Is(err, pgx.ErrNoRows) {
+				a.redirectReview(w, r, "One or more rows were no longer pending — nothing was committed.")
+				return
+			}
+			if err != nil {
+				http.Error(w, "bulk approve: "+err.Error(), 500)
+				return
+			}
+			msg := fmt.Sprintf("%d of %d selected transactions approved.", len(straightRows), len(ids))
+			if len(noCatRows) > 0 {
+				msg += fmt.Sprintf(" %d skipped — no category (approve them individually on the record page).", len(noCatRows))
+			}
+			if lockedN > 0 {
+				msg += fmt.Sprintf(" %d skipped — a payment references their splits.", lockedN)
+			}
+			if denied > 0 {
+				msg += fmt.Sprintf(" %d skipped — no edit permission.", denied)
+			}
+			a.redirectReview(w, r, msg)
 			return
 		}
-		n = res.RowsAffected()
+		// The modal: the summary of everything that WOULD commit (nothing
+		// is committed yet — Cancel approves nothing).
+		a.renderBulkModal(w, r, hh, "review_bulk_modal.html", map[string]any{
+			"Title": "Approve selected records", "Err": "",
+			"Cats": a.syncCategoryOptions(ctx, hh),
+			"SyncRows": syncRows, "StraightRows": straightRows, "Skipped": noCatRows,
+			"LockedN": lockedN, "DeniedN": denied, "IDs": ids,
+		})
+		return
 	}
-	verb := "approved"
-	if target == "void" {
-		verb = "voided"
+
+	// Confirm: validate the sync rows' categories (required; the picker is
+	// the household's active expense categories), then ONE all-or-nothing
+	// commit of every row in the modal.
+	catFor := map[int64]int64{}
+	missing := 0
+	for _, l := range syncRows {
+		cat, _ := formInt64(r, "cat_"+strconv.FormatInt(l.ID, 10))
+		if cat == 0 || !a.syncCatFits(ctx, hh, cat) {
+			missing++
+			continue
+		}
+		catFor[l.ID] = cat
 	}
-	msg := fmt.Sprintf("%d of %d selected transactions %s.", n, len(ids), verb)
-	if len(locked) > 0 {
-		msg += fmt.Sprintf(" %d skipped — a payment references their splits.", len(locked))
+	if missing > 0 {
+		a.renderBulkModal(w, r, hh, "review_bulk_modal.html", map[string]any{
+			"Title": "Approve selected records",
+			"Err":   fmt.Sprintf("%d synced record(s) still need a category — pick one for each.", missing),
+			"Cats":  a.syncCategoryOptions(ctx, hh),
+			"SyncRows": syncRows, "StraightRows": straightRows, "Skipped": noCatRows,
+			"LockedN": lockedN, "DeniedN": denied, "IDs": ids,
+		})
+		return
+	}
+	toCommit := append(append([]reviewLine{}, syncRows...), straightRows...)
+	n, err := a.reviewApproveTx(ctx, hh, sess.UserID, toCommit, catFor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		a.redirectReview(w, r, "One or more rows were no longer pending — nothing was committed.")
+		return
+	}
+	if err != nil {
+		http.Error(w, "bulk approve: "+err.Error(), 500)
+		return
+	}
+	msg := fmt.Sprintf("%d selected transactions approved.", n)
+	if len(noCatRows) > 0 {
+		msg += fmt.Sprintf(" %d skipped — no category (approve them individually on the record page).", len(noCatRows))
+	}
+	if lockedN > 0 {
+		msg += fmt.Sprintf(" %d skipped — a payment references their splits.", lockedN)
 	}
 	if denied > 0 {
 		msg += fmt.Sprintf(" %d skipped — no edit permission.", denied)
@@ -972,6 +1156,86 @@ func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 	a.redirectReview(w, r, msg)
 }
 
+// catName resolves a category id to its "Parent › child" label ("" for 0) —
+// household-local.
+func catName(ctx context.Context, pool *pgxpool.Pool, hh, catID int64) string {
+	if catID == 0 {
+		return ""
+	}
+	var name string
+	err := pool.QueryRow(ctx, `
+		SELECT CASE WHEN pc.name IS NOT NULL AND pc.name <> ''
+		           THEN pc.name || ' › ' || c.name ELSE c.name END
+		FROM category c LEFT JOIN category pc ON pc.id = c.parent_id
+		WHERE c.id = $1 AND c.household_id = $2`, catID, hh).Scan(&name)
+	if err != nil {
+		return ""
+	}
+	return name
+}
+
+// reviewApproveTx commits the given pending rows to 'approved' in ONE
+// all-or-nothing transaction (D34 §B): per row, the status flip (plus the
+// category update for a sync row that got one) and a standard History row.
+// Any row that stopped being pending fails the whole commit (the caller
+// reports "nothing was committed"). catFor maps a row id to the category to
+// apply (absent/0 = keep the row's own; only synced rows carry one).
+func (a *App) reviewApproveTx(ctx context.Context, hh, actor int64, lines []reviewLine, catFor map[int64]int64) (int, error) {
+	tx, err := a.Pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	for _, l := range lines {
+		var upErr error
+		if cat, has := catFor[l.ID]; has && cat > 0 {
+			upErr = tx.QueryRow(ctx, `
+				UPDATE "transaction"
+				SET record_status = 'approved', category_id = $3
+				WHERE id = $1 AND household_id = $2 AND record_status = 'pending'
+				RETURNING id`, l.ID, hh, cat).Scan(&l.ID)
+		} else {
+			upErr = tx.QueryRow(ctx, `
+				UPDATE "transaction"
+				SET record_status = 'approved'
+				WHERE id = $1 AND household_id = $2 AND record_status = 'pending'
+				RETURNING id`, l.ID, hh).Scan(&l.ID)
+		}
+		if upErr != nil {
+			return 0, upErr
+		}
+		summary := "status pending → approved"
+		if cat, has := catFor[l.ID]; has && cat > 0 && cat != l.CatID {
+			summary += " · category set to " + catName(ctx, a.Pool, hh, cat)
+		}
+		if err := a.writeTxnHistoryEvent(ctx, tx, hh, l.ID, "edited", summary, actor); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return len(lines), nil
+}
+
 func (a *App) redirectReview(w http.ResponseWriter, r *http.Request, msg string) {
 	http.Redirect(w, r, "/review?msg="+url.QueryEscape(msg), http.StatusSeeOther)
+}
+
+// renderBulkModal renders the D34 bulk-approval modal page (the summary of
+// everything the Confirm would commit — nothing is committed by the GET).
+func (a *App) renderBulkModal(w http.ResponseWriter, r *http.Request, hh int64, name string, data map[string]any) {
+	data["Flash"] = flashFrom(r)
+	data["Section"] = "review"
+	a.render(w, r, 200, name, data)
+}
+
+// canEditForBulk reports the Edit grant on one record (the bulk-void path's
+// eligibility check) — the same Gate 5 rule as the status endpoint.
+func canEditForBulk(ctx context.Context, a *App, hh, user, id int64, p *perms) bool {
+	surface, inRel, err := a.txnAccess(ctx, hh, user, id)
+	if err != nil {
+		return false
+	}
+	return p.canEditTxn(surface, inRel)
 }

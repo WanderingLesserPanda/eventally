@@ -1,6 +1,7 @@
 {{define "settings-tabs"}}
 <div class="tabs">
   <a href="/settings" class="{{if eq .Tab "household"}}active{{end}}">Household</a>
+  <a href="/settings?tab=sync" class="{{if eq .Tab "sync"}}active{{end}}">Sync</a>
   {{if .CanManage}}
   <a href="/settings?tab=invites" class="{{if eq .Tab "invites"}}active{{end}}">Invites</a>
   <a href="/settings?tab=grants" class="{{if eq .Tab "grants"}}active{{end}}">Grants</a>

@@ -17,11 +17,15 @@
   </div>
   {{else}}
   {{range .Sections}}
-  <div class="sync-section" x-data="{ open: null }">
+  {{$sec := .}}
+  <div class="sync-section" x-data="{ open: null, modal: false }">
     <div class="sync-section-head">
-      <h2>{{.Name}} <span class="muted small">— other household</span></h2>
+      <h2>{{.Name}} <span class="muted small">— other household</span>
+        <button type="button" class="btn small" @click="modal = true">Details &amp; auto-sync</button>
+      </h2>
       <span class="muted small">{{if .Rows}}{{len .Rows}} record(s) syncable for you{{else}}no syncable records{{end}}</span>
     </div>
+
     {{if .Rows}}
     <table>
       <tr><th>Date</th><th>Description</th><th>Category <span class="muted small">(in that household)</span></th><th class="money">My share</th><th>Status</th></tr>
@@ -34,10 +38,12 @@
         <td class="row-actions">
           {{if .Synced}}<a class="tag synced" href="/txns/{{.LocalTxnID}}">synced ✓</a>{{end}}
           {{if .SourceChanged}}<span class="tag changed">source changed</span>{{end}}
+          {{if .Detached}}<span class="tag changed">detached</span>{{end}}
+          {{if and $.AutoSync (not .Synced) (not .Detached)}}<span class="tag syncing">syncing…</span>{{end}}
           {{if or (not .Synced) .SourceChanged}}
           <button type="button" class="btn small sync-toggle"
                   @click="open = (open === {{.SrcTxnID}}) ? null : {{.SrcTxnID}}">
-            {{if .Synced}}Re-sync{{else}}Sync{{end}}
+            {{if .Detached}}Re-link{{else}}{{if .Synced}}Re-sync{{else}}Sync{{end}}{{end}}
           </button>
           {{end}}
         </td>
@@ -45,14 +51,21 @@
       {{if or (not .Synced) .SourceChanged}}
       <tr x-show="open === {{.SrcTxnID}}" x-cloak>
         <td colspan="5">
-          <form method="post" action="/sync" class="sync-panel">
+          <form method="post" action="/sync" class="sync-panel"
+                data-rel="{{.Detached}}"
+                onsubmit="if (this.dataset.rel === 'true' && !confirm('Re-link this record? Amount and date reset to the source\'s values, and the edit lock returns. Your classification stays.')) return false;">
             {{template "csrf" $root}}
             <input type="hidden" name="source_household_id" value="{{.SrcHouseholdID}}">
             <input type="hidden" name="source_txn_id" value="{{.SrcTxnID}}">
-            <p class="muted small"><b>{{if .Synced}}Re-sync{{else}}Sync into {{$.HouseholdName}}{{end}}</b> — pick the category it counts against{{if .Synced}} (your current classification is preselected and kept){{end}}.</p>
+            <p class="muted small">
+              <b>{{if .Detached}}Re-link into {{$.HouseholdName}}{{else if .Synced}}Re-sync from {{$.HouseholdName}}{{else}}Sync into {{$.HouseholdName}}{{end}}</b>
+              {{if .Detached}} — amount and date reset to the source's values; the edit lock returns, your classification stays.
+              {{else if .Synced}} — money facts refresh from the source; your current classification is preselected and kept.
+              {{else}} — pick the category it counts against.{{end}}
+            </p>
             <div class="form-grid">
-              <label>Category <span style="color:var(--danger)">*</span>
-                <select name="category_id" required>
+              <label>Category {{if not .Detached}}<span style="color:var(--danger)">*</span>{{else}}<span class="muted small">kept from the record</span>{{end}}
+                <select name="category_id" {{if not .Detached}}required{{end}}>
                   <option value="">— choose —</option>
                   {{$c := .LocalCat}}{{range $.Cats}}
                   <option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $c)}}selected{{end}}>{{if .Parent}}({{.Parent}}) {{end}}{{.Name}}</option>
@@ -69,7 +82,7 @@
               </label>
             </div>
             <div class="form-actions">
-              <button type="submit" class="btn-primary">{{if .Synced}}Re-sync record{{else}}Sync record{{end}}</button>
+              <button type="submit" class="btn-primary">{{if .Detached}}Re-link record{{else if .Synced}}Re-sync record{{else}}Sync record{{end}}</button>
             </div>
           </form>
         </td>
@@ -80,6 +93,28 @@
     {{else}}
     <p class="muted">No syncable records in {{.Name}} — an expense shows up here when you hold a split share &gt; 0 in it.</p>
     {{end}}
+
+    <div x-show="modal" x-cloak class="hh-modal-backdrop" @click.self="modal = false">
+      <div class="hh-modal" role="dialog" aria-modal="true" aria-label="{{.Name}} — details and auto-sync">
+        <h3>{{.Name}} <span class="muted small">— other household</span></h3>
+        <p class="muted small">Members:</p>
+        <ul class="muted small">{{range .Members}}<li>{{.}}</li>{{end}}</ul>
+        <form method="post" action="/sync/auto">
+          {{template "csrf" $root}}
+          <input type="hidden" name="source_household_id" value="{{.HouseholdID}}">
+          <input type="hidden" name="ret" value="live">
+          <label class="row" style="gap:.5rem">
+            <input type="checkbox" name="on" value="1" {{if .AutoSync}}checked{{end}}>
+            Auto-sync into {{$.HouseholdName}}
+          </label>
+          <p class="muted small">New records from {{.Name}} that you share arrive here as <b>pending</b> (your category mapping pre-fills the category, when there is one). Turning it on syncs the current backlog now; turning it off stops new copies — existing records are not touched.</p>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">Save</button>
+            <button type="button" class="btn" @click="modal = false">Close</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
   {{end}}
 
@@ -88,6 +123,8 @@
     <ul class="muted small">
       <li><span class="tag synced">synced ✓</span> — counts in this household's budgets (your share only), under your category</li>
       <li><span class="tag changed">source changed</span> — the source record's amount or date moved; re-sync to refresh</li>
+      <li><span class="tag changed">detached</span> — the synced copy was detached (fully editable in <a href="/txns">Transactions</a>); re-link to follow the source again</li>
+      <li><span class="tag syncing">syncing…</span> — auto-sync is on for this household and the copy is being created (open the review queue when it lands)</li>
       <li>listed = your syncable records only: expenses where you hold a split share &gt; 0 (unvoided)</li>
       <li>the source household's own <b>/txns</b> is unchanged — it sees no synced state of its own</li>
     </ul>

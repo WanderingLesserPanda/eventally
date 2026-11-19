@@ -38,9 +38,11 @@ type dashPersonOut struct {
 // budget roll-up (parent budget = sum of the budgetable subtree) and the
 // actuals over the records the caller may see. Extracted from
 // handleDashboard so the D33 tests can assert that a synced row enters the
-// budget with zero query changes. Gate 5: the fragment spliced via %s uses
-// $1 (household) and $4 (user id — the 4th bound value after hh, monthStart,
-// monthEnd).
+// budget with zero query changes. D34 §B: an auto-synced copy (is_synced)
+// counts in the budget only after approval — a PENDING synced row is
+// excluded (manual pending rows still count). Gate 5: the fragment spliced
+// via %s uses $1 (household) and $4 (user id — the 4th bound value after hh,
+// monthStart, monthEnd).
 func (a *App) dashCategoryRows(ctx context.Context, p *perms, hh, user int64, monthStart, monthEnd time.Time) ([]dashCatRow, error) {
 	rows, err := a.Pool.Query(ctx, fmt.Sprintf(`
 		WITH RECURSIVE tree AS (
@@ -58,6 +60,7 @@ func (a *App) dashCategoryRows(ctx context.Context, p *perms, hh, user int64, mo
 		          AND t.root_id = tops.id),
 		       (SELECT COALESCE(SUM(a.total_amount), 0) FROM "transaction" a
 		        WHERE a.household_id = $1 AND a.record_status <> 'void'
+		          AND NOT (a.is_synced AND a.record_status = 'pending')
 		          AND a.class = 'expense'
 		          AND a.transaction_date >= $2 AND a.transaction_date < $3
 		          AND %s

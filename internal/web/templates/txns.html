@@ -72,7 +72,7 @@
       </td>
       <td>{{date .Date}}</td>
       <td><a href="/txns/{{.ID}}">{{.Label}}{{if .Original}}<br><span class="muted small">{{.Original}}</span>{{end}}</a></td>
-      <td>{{orDash .Category}}</td>
+      <td>{{if .NoCat}}<span class="tag no-cat">no category</span>{{else}}{{orDash .Category}}{{end}}</td>
       <td class="money">{{money .Total}}</td>
       <td>{{orDash .FromTo}}</td>
       <td><span class="tag">{{.Status}}</span>{{if .Synced}}<span class="tag synced">synced ✓</span>{{end}}{{range .SyncedBy}}<span class="tag a-synced">synced by {{.}}</span>{{end}}</td>

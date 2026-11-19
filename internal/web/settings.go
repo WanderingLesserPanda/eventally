@@ -7,8 +7,10 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -24,7 +26,8 @@ func (a *App) renderTabbed(w http.ResponseWriter, r *http.Request, status int, p
 }
 
 // handleSettings renders the requested tab. Invites/Grants require the
-// admin tier; non-admins fall back to the Household tab.
+// admin tier; non-admins fall back to the Household tab. Sync (D34) is for
+// every member: the auto-sync toggles + the category mappings.
 func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 	tab := r.URL.Query().Get("tab")
 	if tab == "" {
@@ -43,8 +46,340 @@ func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		tab = "household"
+	case "sync":
+		a.handleSettingsSync(w, r)
+		return
 	}
 	a.handleSettingsHousehold(w, r)
+}
+
+// handleSettingsSync is the Settings "Sync" tab (D34) — the second home of
+// the auto-sync setting (the Live view's household modal is the first: one
+// setting, two views on the same row) and the category-mapping section
+// (spec §B): the caller's own rules, grouped by source household, with the
+// create form (the source category list is the named cross-household read,
+// surface 6).
+func (a *App) handleSettingsSync(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFromContext(r.Context())
+	if sess == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	ctx := r.Context()
+	hh := sess.Household
+	if hh == 0 {
+		hh, _ = a.landHousehold(ctx, sess.UserID)
+	}
+	if hh == 0 {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	user := sess.UserID
+
+	// The auto-sync toggles: the caller's other households, each with its
+	// members (the household-detail read, surface 7) and the toggle state.
+	type toggleRow struct {
+		HouseholdID int64
+		Name        string
+		Members     []string
+		On          bool
+	}
+	ms, err := a.memberships(ctx, user)
+	if err != nil {
+		http.Error(w, "load memberships: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var toggles []toggleRow
+	for _, m := range ms {
+		if m.HouseholdID == hh {
+			continue
+		}
+		members, err := a.syncHouseholdMembers(ctx, m.HouseholdID)
+		if err != nil {
+			http.Error(w, "load household members: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		on, err := a.syncToggleState(ctx, user, m.HouseholdID, hh)
+		if err != nil {
+			http.Error(w, "load auto-sync state: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		toggles = append(toggles, toggleRow{m.HouseholdID, m.Name, members, on})
+	}
+
+	// The caller's category-mapping rules, grouped by source household.
+	type mappingLine struct {
+		ID        int64
+		SourceCat string
+		TargetCat string
+	}
+	type mappingGroup struct {
+		HH   int64
+		Name string
+		Rows []mappingLine
+	}
+	groups := map[int64]*mappingGroup{}
+	var groupOrder []int64
+	mrows, err := a.Pool.Query(ctx, `
+		SELECT cm.id, cm.source_household_id, sh.name,
+		       COALESCE(sc.name, '—'),
+		       CASE WHEN pc.name IS NOT NULL AND pc.name <> ''
+		            THEN pc.name || ' › ' || tc.name ELSE tc.name END
+		FROM category_mapping cm
+		JOIN household sh ON sh.id = cm.source_household_id
+		LEFT JOIN category sc ON sc.id = cm.source_category_id
+		LEFT JOIN category tc ON tc.id = cm.target_category_id
+		LEFT JOIN category pc ON pc.id = tc.parent_id
+		WHERE cm.household_id = $1
+		ORDER BY sh.name, sc.name, tc.name`, hh)
+	if err != nil {
+		http.Error(w, "load mappings: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for mrows.Next() {
+		var l mappingLine
+		var srcHH int64
+		var srcHHName, srcCat string
+		var targetCat string
+		if err := mrows.Scan(&l.ID, &srcHH, &srcHHName, &srcCat, &targetCat); err != nil {
+			mrows.Close()
+			http.Error(w, "load mappings: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		l.SourceCat, l.TargetCat = srcCat, targetCat
+		g, ok := groups[srcHH]
+		if !ok {
+			g = &mappingGroup{HH: srcHH, Name: srcHHName}
+			groups[srcHH] = g
+			groupOrder = append(groupOrder, srcHH)
+		}
+		g.Rows = append(g.Rows, l)
+	}
+	if err := mrows.Err(); err != nil {
+		mrows.Close()
+		http.Error(w, "load mappings: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	mrows.Close()
+	var mappingGroups []mappingGroup
+	for _, hhID := range groupOrder {
+		mappingGroups = append(mappingGroups, *groups[hhID])
+	}
+
+	// The create form: the source household's active categories (the named
+	// cross-household read, surface 6), each labelled with its household;
+	// the target picker is this household's active expense categories.
+	type srcChoice struct {
+		HHID  int64
+		CatID int64
+		Label string
+	}
+	var srcChoices []srcChoice
+	for _, m := range ms {
+		if m.HouseholdID == hh {
+			continue
+		}
+		cats := a.sourceCategoryList(ctx, m.HouseholdID)
+		for _, c := range cats {
+			name := c.Name
+			if c.Parent != "" {
+				name = c.Parent + " › " + c.Name
+			}
+			srcChoices = append(srcChoices, srcChoice{m.HouseholdID, c.ID, m.Name + " › " + name})
+		}
+	}
+
+	a.renderTabbed(w, r, 200, "settings_sync.html", "sync", map[string]any{
+		"Title":         "Settings · Sync",
+		"Flash":         flashFrom(r),
+		"Toggles":       toggles,
+		"MappingGroups": mappingGroups,
+		"SrcChoices":    srcChoices,
+		"TargetCats":    a.syncCategoryOptions(ctx, hh),
+		"Err":           r.URL.Query().Get("err"),
+	})
+}
+
+// sourceCategoryList is the source-household category read for the mapping
+// create form (surface 6): the source household's active category names —
+// the only place a household's CATEGORIES cross.
+func (a *App) sourceCategoryList(ctx context.Context, srcHH int64) []opt {
+	var out []opt
+	rows, err := a.Pool.Query(ctx, `
+		SELECT c.id, c.name, COALESCE(p.name, '')
+		FROM category c
+		LEFT JOIN category p ON p.id = c.parent_id
+		WHERE c.household_id = $1 AND c.is_active
+		ORDER BY c.transaction_class, c.sort_order, c.name`, srcHH)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c opt
+		if err := rows.Scan(&c.ID, &c.Name, &c.Parent); err == nil {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// mappingTargetFits: the target category exists in the caller's household,
+// is active, and is an expense class (a mapped copy is an expense).
+func (a *App) mappingTargetFits(ctx context.Context, hh, catID int64) bool {
+	return a.syncCatFits(ctx, hh, catID)
+}
+
+// handleMappingCreate is POST /settings/mapping — the category-mapping
+// create (spec §B): one rule per (source household, source category) in the
+// caller's household. The source pair is app-validated (the isolation
+// convention — no cross-household FKs): the caller still belongs to the
+// source household and the category is still active there.
+func (a *App) handleMappingCreate(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFromContext(r.Context())
+	if sess == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	ctx := r.Context()
+	hh := sess.Household
+	if hh == 0 {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	const home = "/settings?tab=sync"
+	srcHH, srcCat, err := parseMappingChoice(r.FormValue("source"))
+	if err != nil {
+		http.Error(w, "pick a source category.", http.StatusBadRequest)
+		return
+	}
+	target, _ := formInt64(r, "target_category_id")
+	member, merr := a.isMember(ctx, sess.UserID, srcHH)
+	if merr != nil {
+		http.Error(w, "could not check membership.", http.StatusInternalServerError)
+		return
+	}
+	if !member {
+		http.Error(w, "you no longer belong to that household.", http.StatusBadRequest)
+		return
+	}
+	// Surface 6: the source category must still be active there.
+	if !a.sourceCatActive(ctx, srcHH, srcCat) {
+		a.redirectRef(w, r, home+"?err=1", "That source category is no longer active.")
+		return
+	}
+	if !a.mappingTargetFits(ctx, hh, target) {
+		http.Error(w, "choose one of this household's expense categories.", http.StatusBadRequest)
+		return
+	}
+	_, err = a.Pool.Exec(ctx, `
+		INSERT INTO category_mapping (household_id, source_household_id, source_category_id, target_category_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (household_id, source_household_id, source_category_id) DO NOTHING`,
+		hh, srcHH, srcCat, target)
+	if err != nil {
+		http.Error(w, "save mapping: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	a.redirectRef(w, r, home, "Category mapping saved.")
+}
+
+// parseMappingChoice splits the create form's "srcHH:srcCat" value.
+func parseMappingChoice(v string) (srcHH, srcCat int64, err error) {
+	parts := strings.SplitN(v, ":", 2)
+	if len(parts) != 2 {
+		return 0, 0, errors.New("bad choice")
+	}
+	srcHH, err = strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || srcHH <= 0 {
+		return 0, 0, errors.New("bad source household")
+	}
+	srcCat, err = strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || srcCat <= 0 {
+		return 0, 0, errors.New("bad source category")
+	}
+	return srcHH, srcCat, nil
+}
+
+// sourceCatActive: the source category exists and is active in the source
+// household (surface 6 read).
+func (a *App) sourceCatActive(ctx context.Context, srcHH, catID int64) bool {
+	var ok bool
+	err := a.Pool.QueryRow(ctx, `
+		SELECT TRUE FROM category
+		WHERE id = $1 AND household_id = $2 AND is_active`, catID, srcHH).Scan(&ok)
+	return err == nil && ok
+}
+
+// handleMappingUpdate is POST /settings/mapping/{id} — retargets an existing
+// rule (the source pair is immutable; the rule belongs to the caller's
+// household).
+func (a *App) handleMappingUpdate(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	sess := sessionFromContext(r.Context())
+	if sess == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	ctx := r.Context()
+	hh := sess.Household
+	if hh == 0 {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	target, _ := formInt64(r, "target_category_id")
+	if !a.mappingTargetFits(ctx, hh, target) {
+		http.Error(w, "choose one of this household's expense categories.", http.StatusBadRequest)
+		return
+	}
+	tag, err := a.Pool.Exec(ctx, `
+		UPDATE category_mapping SET target_category_id = $1
+		WHERE id = $2 AND household_id = $3`, target, id, hh)
+	if err != nil {
+		http.Error(w, "update mapping: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	a.redirectRef(w, r, "/settings?tab=sync", "Category mapping updated.")
+}
+
+// handleMappingDelete is POST /settings/mapping/{id}/delete — removes one of
+// the caller's rules (household-local).
+func (a *App) handleMappingDelete(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	sess := sessionFromContext(r.Context())
+	if sess == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	ctx := r.Context()
+	hh := sess.Household
+	if hh == 0 {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	tag, err := a.Pool.Exec(ctx, `
+		DELETE FROM category_mapping WHERE id = $1 AND household_id = $2`, id, hh)
+	if err != nil {
+		http.Error(w, "delete mapping: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	a.redirectRef(w, r, "/settings?tab=sync", "Category mapping removed.")
 }
 
 // handleSettingsHousehold is the Household tab: the caller's default

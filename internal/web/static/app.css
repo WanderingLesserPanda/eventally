@@ -81,6 +81,10 @@ th.money { text-align: right; }
 .tag.synced { background: #fbeee2; color: #9a4b00; }
 .tag.a-synced { background: #f2f4f8; color: var(--muted); }
 .tag.changed { background: transparent; color: #b45309; border: 1px solid #e9a15e; }
+/* D34: in-motion auto-sync target (the copy hasn't materialized yet) + the
+   explicit "no category" marker on legacy rows. */
+.tag.syncing { background: #e8f1fb; color: #1d5fbf; border: 1px solid #bcd4f2; }
+.tag.no-cat { background: #fdecec; color: #b03030; }
 .empty { padding: 1.4rem 0.4rem; }
 .empty h2 { margin-top: 0; }
 .sync-section { margin-top: 1.5rem; }

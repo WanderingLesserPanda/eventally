@@ -1,0 +1,107 @@
+{{define "page/settings_sync"}}
+{{$root := .}}
+{{template "settings-tabs" .}}
+<div class="card">
+  <h1>Auto-sync</h1>
+  <p class="muted small">One setting per other household: while it's on, new records from that household
+  that you share arrive in <b>this</b> household as <b>pending</b> — in the review queue, with the mapped
+  category pre-filled when there is one. Turning it on also syncs the current backlog now.
+  The same toggles live on each household in the <a href="/sync">sync view</a> — one setting, two views.</p>
+  {{if .Err}}<div class="error">That source category is no longer active — pick another.</div>{{end}}
+  {{if .Toggles}}
+  <table>
+    <tr><th>Household</th><th>Members</th><th>Auto-sync here</th></tr>
+    {{range .Toggles}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td class="muted small">{{range $i, $m := .Members}}{{if $i}}, {{end}}{{$m}}{{end}}</td>
+      <td>
+        <form method="post" action="/sync/auto">
+          {{template "csrf" $root}}
+          <input type="hidden" name="source_household_id" value="{{.HouseholdID}}">
+          <input type="hidden" name="ret" value="settings">
+          <label class="row" style="gap:.5rem">
+            <input type="checkbox" name="on" value="1" {{if .On}}checked{{end}}>
+            {{if .On}}on{{else}}off{{end}}
+          </label>
+          <button type="submit" class="btn small">Save</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="muted">You belong to no other households — nothing to auto-sync from. <a href="/settings">Join one</a> first.</p>
+  {{end}}
+</div>
+
+<div class="card">
+  <h1>Category mappings</h1>
+  <p class="muted small">When an auto-synced copy arrives from another household, its category is pre-filled
+  from your rules below (your category, not theirs). No rule → the copy arrives without a category, and the
+  review pop-up asks for one (you can save it as a rule there, too).</p>
+
+  {{if .MappingGroups}}
+  {{range .MappingGroups}}
+  <h2>{{.Name}} <span class="muted small">— source household</span></h2>
+  <table>
+    <tr><th>Source category</th><th>Counts as</th><th></th></tr>
+    {{range .Rows}}
+    <tr>
+      <td>{{.SourceCat}}</td>
+      <td>
+        <form method="post" action="/settings/mapping/{{.ID}}" style="display:flex;gap:.5rem;align-items:center">
+          {{template "csrf" $root}}
+          <select name="target_category_id" required>
+            {{$c := .TargetCat}}{{range $.TargetCats}}
+            <option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $c)}}selected{{end}}>{{if .Parent}}({{.Parent}}) {{end}}{{.Name}}</option>
+            {{end}}
+          </select>
+          <button type="submit" class="btn small">Save</button>
+        </form>
+      </td>
+      <td class="row-actions">
+        <form method="post" action="/settings/mapping/{{.ID}}/delete" onsubmit="return confirm('Remove this category mapping? Auto-synced copies from this category will arrive without a pre-filled category.')">
+          {{template "csrf" $root}}
+          <button type="submit" class="btn small btn-danger">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{end}}
+  {{else}}
+  <p class="muted">No rules yet — add one below.</p>
+  {{end}}
+
+  {{if and .SrcChoices .TargetCats}}
+  <h2>Add a rule</h2>
+  <form method="post" action="/settings/mapping">
+    {{template "csrf" $root}}
+    <div class="form-grid">
+      <label>Source category <span class="muted small">(another household)</span>
+        <select name="source" required>
+          <option value="">— choose —</option>
+          {{range .SrcChoices}}
+          <option value="{{.HHID}}:{{.CatID}}">{{.Label}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Counts as <span class="muted small">(this household)</span>
+        <select name="target_category_id" required>
+          <option value="">— choose —</option>
+          {{range .TargetCats}}
+          <option value="{{.ID}}">{{if .Parent}}({{.Parent}}) {{end}}{{.Name}}</option>
+          {{end}}
+        </select>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn-primary">Add rule</button>
+    </div>
+  </form>
+  {{else}}
+  <p class="muted">Nothing to map from yet — you need another household with active categories.</p>
+  {{end}}
+</div>
+{{end}}

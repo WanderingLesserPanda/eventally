@@ -220,7 +220,7 @@ type TxnForm struct {
 	ID      int64
 	Err     string
 	Locked  bool // a settlement already references the splits -> cannot edit
-	Synced  bool // D33: source='sync' — destination is optional, money facts locked
+	Synced  bool // D34: currently synced (is_synced) — destination is optional, money facts locked
 
 	Class           string
 	Date            string
@@ -306,7 +306,7 @@ func (a *App) loadTxnForm(ctx context.Context, hh, id int64) (*TxnForm, error) {
 	)
 	err = a.Pool.QueryRow(ctx, `
 		SELECT t.id, t.transaction_date, t.class, t.description, t.notes,
-		       t.total_amount, t.record_status, t.source,
+		       t.total_amount, t.record_status, t.source, t.is_synced,
 		       COALESCE(t.category_id, 0), COALESCE(t.merchant_id, 0),
 		       t.origin_account_id, t.destination_account_id,
 		       t.origin_party_id, t.destination_party_id,
@@ -315,7 +315,7 @@ func (a *App) loadTxnForm(ctx context.Context, hh, id int64) (*TxnForm, error) {
 		FROM "transaction" t
 		WHERE t.id = $1 AND t.household_id = $2`, id, hh).
 		Scan(&t.ID, &t.Date, &t.Class, &t.Description, &t.Notes, &t.Total,
-			&t.Status, &t.Source, &catsel, &mers, &origAcc, &destAcc,
+			&t.Status, &t.Source, &f.Synced, &catsel, &mers, &origAcc, &destAcc,
 			&origParty, &destParty, &charged, &orig, &rate)
 	if err != nil {
 		return nil, err
@@ -324,7 +324,6 @@ func (a *App) loadTxnForm(ctx context.Context, hh, id int64) (*TxnForm, error) {
 	f.Date = t.Date.Format("2006-01-02")
 	f.Class = t.Class
 	f.Total = t.Total.String()
-	f.Synced = t.Source == "sync"
 	f.Description = t.Description
 	f.Notes = t.Notes
 	f.CategoryID = catsel
@@ -635,6 +634,18 @@ func keysOf(parts []split.Part) []string {
 	return out
 }
 
+// categoryRequiredErr is the ONE home of the "a record must carry a
+// category" rule (D34 §C): the manual record form, the recurring-template
+// form, and the review pop-ups all call it — a future policy change (e.g.
+// sub-categories mandatory) lands in this single function. Any category
+// level is acceptable today (same picker as the record form).
+func categoryRequiredErr(catID int64, cats []opt) error {
+	if catID > 0 {
+		return nil
+	}
+	return errors.New("Pick the category it counts against.")
+}
+
 // validateRefs checks that every referenced row exists and belongs to the
 // household. The DB now has real FKs for accounts/parties; this is the
 // pre-save UX layer (friendlier errors before the INSERT).
@@ -682,17 +693,32 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 		http.Error(w, "permission load: "+perr.Error(), 500)
 		return
 	}
-	// D33 §D: on a synced row the destination is optional (the copy has no
-	// account endpoint — its surface is the source household's party).
-	syncedRow := false
+	// D33 §D / D34: the destination stays optional while the row is
+	// sync-shaped (the copy's surface is the source household's party —
+	// true whether currently synced or detached). syncShaped is the
+	// immutable birth marker source='sync' (the row is a sync copy that
+	// still exists — the pointer is set at birth and never cleared, so the
+	// marker is exactly the sync-shaped set), keeping the cross-household
+	// pointer seam inside sync.go (D33 probe). The MONEY-FACT LOCK follows
+	// is_synced (ADR-0007): a detached copy is an ordinary row —
+	// amount/date/class/endpoints editable — and re-linking it locks it
+	// again.
+	syncedRow, syncShaped := false, false
 	if id > 0 {
 		_ = a.Pool.QueryRow(r.Context(), `
-			SELECT source = 'sync' FROM "transaction"
-			WHERE id = $1 AND household_id = $2`, id, hh).Scan(&syncedRow)
-		}
-	spec, f, parseErr := parseTxnForm(r, syncedRow)
+			SELECT is_synced, source = 'sync'
+			FROM "transaction"
+			WHERE id = $1 AND household_id = $2`, id, hh).Scan(&syncedRow, &syncShaped)
+	}
+	spec, f, parseErr := parseTxnForm(r, syncShaped)
 	if parseErr != "" {
 		a.reRenderForm(w, r, hh, id, f, parseErr)
+		return
+	}
+	// D34: every record carries a category — the single shared rule (the
+	// one place a future mandatory-subcategory policy lands).
+	if err := categoryRequiredErr(spec.categoryID, f.Cats); err != nil {
+		a.reRenderForm(w, r, hh, id, f, err.Error())
 		return
 	}
 	if err := a.validateRefs(r.Context(), hh, spec); err != nil {
@@ -900,6 +926,11 @@ func (a *App) saveTxn(w http.ResponseWriter, r *http.Request, hh, id int64) {
 		return
 	}
 
+	// D34 (ADR-0008): the write-time auto-sync trigger — best-effort, after
+	// the record's own commit; a trigger failure never fails the member's
+	// save. (Synced copies never trigger: they carry no split rows.)
+	a.autoSyncTrigger(ctx, hh, txnID)
+
 	msg := "Transaction saved."
 	if id == 0 {
 		msg = "Transaction created."
@@ -943,12 +974,13 @@ type txnLine struct {
 	Date      time.Time
 	Label     string
 	Category  string
+	NoCat     bool // D34: legacy row without a category — the explicit "no category" marker
 	Total     money.Money
 	Charged   string // e.g. "JPY", "" when base currency
 	Original  string // e.g. "400 JPY" when Charged != ""
 	FromTo    string
 	Status    string
-	Synced    bool // D33: a synced copy (source='sync') — the "synced ✓" badge
+	Synced    bool // D34: currently synced (is_synced) — the "synced ✓" badge
 	SyncedBy  []string // D33 follow-up: A-side chip — members who synced a copy elsewhere
 }
 
@@ -1024,8 +1056,8 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 		       t.record_status, COALESCE(c.name, ''), COALESCE(m.name, ''),
 		       COALESCE(oa.name, COALESCE(oc.name, COALESCE(m.name, ''))),
 		       COALESCE(da.name, COALESCE(dc.name, '')),
-		       t.source = 'sync'
-		FROM "transaction" t
+		       COALESCE(t.is_synced, false)
+		       FROM "transaction" t
 		LEFT JOIN category c      ON c.id = t.category_id
 		LEFT JOIN merchant m      ON m.id = t.merchant_id
 		LEFT JOIN account oa ON oa.id = t.origin_account_id
@@ -1059,6 +1091,7 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 		if l.Label == "" {
 			l.Label = merch
 		}
+		l.NoCat = l.Category == ""
 		if l.Charged != "" {
 			l.Original = trimNum(orig) + " " + l.Charged
 		}
@@ -1243,7 +1276,10 @@ type txnDetail struct {
 	DestLabel    string
 	Status       string
 	Source       string
-	Synced       bool // D33: a synced copy (source='sync') — the detail badge
+	Synced       bool // D34: currently synced (is_synced, ADR-0007) — the detail badge
+	Detachable   bool // D34: a synced copy — the "Detach from source" action is offered
+	NoCat        bool // D34: no category (legacy rows) — the explicit "no category" marker
+	Cats         []opt // D34: the record-form picker (the pending-no-category approve form)
 	SyncedBy     []string // D33 follow-up: A-side "synced by" lines (source side only)
 	RecordedBy   string
 	Splits       []splitLine
@@ -1284,7 +1320,7 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 	)
 	err = a.Pool.QueryRow(ctx, `
 		SELECT t.id, t.transaction_date, t.class, t.description, t.notes,
-		       t.total_amount, t.record_status, t.source,
+		       t.total_amount, t.record_status, t.source, t.is_synced,
 		       COALESCE(u.display_name, ''),
 		       COALESCE(oa.name, COALESCE(oc.name, COALESCE(m2.name, ''))),
 		       COALESCE(da.name, COALESCE(dc.name, '')),
@@ -1302,7 +1338,7 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN category c2 ON c2.id = t.category_id
 		WHERE t.id = $1 AND t.household_id = $2`, id, hh).
 		Scan(&t.ID, &t.Date, &t.Class, &t.Description, &t.Notes, &t.Total,
-			&t.Status, &t.Source, &t.RecordedBy,
+			&t.Status, &t.Source, &t.Synced, &t.RecordedBy,
 			&t.OriginLabel, &t.DestLabel,
 			&charged, &orig, &rate, &mers, &catsel, &t.ReceiptPath,
 			&merch, &cat)
@@ -1321,7 +1357,18 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.Merchant, t.Category = merch, cat
-	t.Synced = t.Source == "sync"
+	t.NoCat = catsel == 0
+	// A copy offers the detach action while it is currently synced
+	// (is_synced). Detach is what flips it off; a row is synced only if it
+	// is a sync copy, so the flag alone decides detachability.
+	t.Detachable = t.Synced
+	// D34: the pending-no-category approve form offers the record form's
+	// picker (any level) — loaded only when the row actually needs it.
+	if t.Status == "pending" && t.NoCat {
+		if o, err := a.txnFormOptions(ctx, hh); err == nil {
+			t.Cats = o.Cats
+		}
+	}
 	t.SyncedBy = a.aSyncedBy(ctx, hh, []int64{id})[id]
 	t.Charged = charged
 	if orig != 0 {
@@ -1455,6 +1502,24 @@ func (a *App) handleTxnStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "You do not have permission to change this transaction's status.", http.StatusForbidden)
 		return
 	}
+	// D34: the single-record approval surface — an optional category
+	// update, REQUIRED when approving a pending row that has none (any
+	// source; the same picker as the record form, any category level),
+	// plus the optional "remember this mapping" rule for synced copies.
+	catID, _ := formInt64(r, "category_id")
+	remember := r.FormValue("remember_mapping") == "on"
+	var curCat int64
+	_ = a.Pool.QueryRow(ctx, `SELECT COALESCE(category_id, 0) FROM "transaction" WHERE id = $1 AND household_id = $2`, id, hh).Scan(&curCat)
+	if target == "approved" && cur == "pending" && curCat == 0 && catID == 0 {
+		http.Error(w, "This record has no category — pick one before approving.", http.StatusBadRequest)
+		return
+	}
+	if catID > 0 {
+		if !refExists(ctx, a.Pool, "category", catID, hh) {
+			http.Error(w, "choose one of this household's categories.", http.StatusBadRequest)
+			return
+		}
+	}
 	if target == "void" {
 		// D33 §C: voids go through the centralized void path — it writes
 		// the History row and cascades immediately to every synced copy
@@ -1485,19 +1550,49 @@ func (a *App) handleTxnStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	// D31 History (§B5): every status move is a history event, written in
 	// its own short transaction with the update.
+	// D34: an optional category update commits with it (the single-record
+	// approval pop-up), and the optional "remember this mapping" rule is
+	// saved first (a failed rule fails the request — nothing commits).
+	var catName string
+	if catID > 0 {
+		if remember {
+			if err := a.rememberMapping(ctx, hh, id, catID); err != nil {
+				http.Error(w, "could not save the mapping rule.", http.StatusBadRequest)
+				return
+			}
+		}
+		_ = a.Pool.QueryRow(ctx, `
+			SELECT CASE WHEN pc.name IS NOT NULL AND pc.name <> ''
+			           THEN pc.name || ' › ' || c.name ELSE c.name END
+			FROM category c LEFT JOIN category pc ON pc.id = c.parent_id
+			WHERE c.id = $1 AND c.household_id = $2`, catID, hh).Scan(&catName)
+	}
 	tx, err := a.Pool.Begin(ctx)
 	if err != nil {
 		http.Error(w, "internal error", 500)
 		return
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx,
-		`UPDATE "transaction" SET record_status = $3 WHERE id = $1 AND household_id = $2`,
-		id, hh, target); err != nil {
-		http.Error(w, "update status: "+err.Error(), 500)
+	var upErr error
+	if catID > 0 {
+		upErr = tx.QueryRow(ctx, `
+			UPDATE "transaction"
+			SET record_status = $3, category_id = $4
+			WHERE id = $1 AND household_id = $2
+			RETURNING id`, id, hh, target, catID).Scan(&id)
+	} else {
+		upErr = tx.QueryRow(ctx, `
+			UPDATE "transaction" SET record_status = $3 WHERE id = $1 AND household_id = $2
+			RETURNING id`, id, hh, target).Scan(&id)
+	}
+	if upErr != nil {
+		http.Error(w, "update status: "+upErr.Error(), 500)
 		return
 	}
 	action, summary := "edited", "status "+cur+" → "+target
+	if catID > 0 && catID != curCat {
+		summary += " · category set to " + catName
+	}
 	name, hdate, hamount, accIDs, relIDs, err := a.txnHistorySnapshot(ctx, tx, hh, id)
 	if err != nil {
 		http.Error(w, "internal error", 500)
