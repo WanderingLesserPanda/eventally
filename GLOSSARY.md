@@ -152,6 +152,37 @@ by a settlement.
 _Avoid_: mirror, import (the P8 data migration — a different thing,
 `source='import'`), foreign record
 
+**Auto-sync**:
+A per-member setting in a target household: the member's related records from a
+source household are copied over automatically as they occur, without any
+per-record action. Unlike a manual sync, an auto-synced copy arrives as
+*pending* and awaits the member's review before it is approved.
+_Avoid_: mirror, import (the P8 one-time data migration), auto-import
+
+**Category mapping**:
+A per-household rule mapping one of a source household's categories to one of
+the current household's own, used as the default classification for
+auto-synced records. A rule is created explicitly or as a saved convenience
+during review; when no rule matches, the record arrives without a category and
+one is chosen at review time.
+_Avoid_: merchant mapping (merchants carry no budget value, only a
+description), catch-all (no default bucket is used)
+
+**Detached record**:
+A synced record the target household kept but un-linked from its source:
+the `is_synced` flag is off and `detached_at` is set, while `source` and
+the source pointers are unchanged. It becomes a fully ordinary, editable
+record; the source no longer controls it (no void cascade, no money-fact
+refresh); the A-side "synced by" badge disappears. It can be re-linked.
+_Avoid_: un-synced (that is deleting the copy), orphaned, unlinked
+
+**Re-link**:
+Re-syncing a source record whose copy in this household is detached: the
+upsert re-attaches the same row (the flag flips back on, `detached_at`
+clears), resetting amount and date to the source's values and keeping the
+local classification and status. It never creates a second copy.
+_Avoid_: re-sync (the general refresh of a linked copy), resync
+
 ### Account lifecycle
 
 **Archived account**:
