@@ -17,7 +17,7 @@
         <td><input type="checkbox" name="id[]" value="{{.ID}}" class="row-check" checked></td>
         <td>{{date .Date}}</td>
         <td><a href="/txns/{{.ID}}">{{.Label}}</a></td>
-        <td>{{if .NoCat}}<span class="tag no-cat">no category</span>{{else}}{{orDash .Category}}{{end}}</td>
+        <td>{{if .NoCat}}<span class="tag no-cat">no category</span>{{else}}{{catIcon .Icon}} {{orDash .Category}}{{end}}</td>
         <td class="money">{{money .Total}}</td>
         <td><span class="tag {{if .Synced}}synced{{end}}">{{.Source}}</span></td>
         <td>{{orDash .RecordedBy}}</td>

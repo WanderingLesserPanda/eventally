@@ -17,6 +17,9 @@ import (
 // dashCatRow is one top-level category in the spend and budget cards.
 type dashCatRow struct {
 	Name   string
+	// Icon is the D32 glyph key ("" = unpicked; the template renders the
+	// category default via the catIcon function).
+	Icon   string
 	Actual money.Money
 	Budget money.Money
 }
@@ -53,7 +56,7 @@ func (a *App) dashCategoryRows(ctx context.Context, p *perms, hh, user int64, mo
 			JOIN tree t ON c.parent_id = t.id
 			WHERE c.household_id = $1 AND c.is_active
 		)
-		SELECT tops.id, tops.name,
+		SELECT tops.id, tops.name, COALESCE(tops.icon, ''),
 		       (SELECT COALESCE(SUM(COALESCE(c.budget_per_month, 0)), 0)
 		        FROM category c JOIN tree t ON t.id = c.id
 		        WHERE c.household_id = $1 AND c.is_active
@@ -79,7 +82,7 @@ func (a *App) dashCategoryRows(ctx context.Context, p *perms, hh, user int64, mo
 	for rows.Next() {
 		var c dashCatRow
 		var id int64
-		if err := rows.Scan(&id, &c.Name, &c.Budget, &c.Actual); err != nil {
+		if err := rows.Scan(&id, &c.Name, &c.Icon, &c.Budget, &c.Actual); err != nil {
 			rows.Close()
 			return nil, err
 		}

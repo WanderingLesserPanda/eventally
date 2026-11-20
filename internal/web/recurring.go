@@ -835,8 +835,10 @@ type reviewLine struct {
 	Date       time.Time
 	Label      string
 	Category   string
-	CatID      int64
-	NoCat      bool // D34: no category — the explicit marker (legacy rows)
+	// Icon is the D32 category glyph key ("" = unpicked or no category).
+	Icon  string
+	CatID int64
+	NoCat bool // D34: no category — the explicit marker (legacy rows)
 	Synced     bool // D34: currently synced (is_synced) — the bulk modal lists these
 	Total      money.Money
 	Source     string
@@ -859,7 +861,7 @@ func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT t.id, t.transaction_date, COALESCE(t.description,
 		       COALESCE(m.name, 'transaction')),
-		       COALESCE(t.category_id, 0), COALESCE(c.name, ''),
+		       COALESCE(t.category_id, 0), COALESCE(c.name, ''), COALESCE(c.icon, ''),
 		       t.total_amount, COALESCE(t.is_synced, false),
 		       COALESCE(t.source, 'manual'),
 		       COALESCE(u.display_name, '')
@@ -880,7 +882,7 @@ func (a *App) handleReview(w http.ResponseWriter, r *http.Request) {
 		var l reviewLine
 		var catID int64
 		var catNameV string
-		if err := rows.Scan(&l.ID, &l.Date, &l.Label, &catID, &catNameV, &l.Total,
+		if err := rows.Scan(&l.ID, &l.Date, &l.Label, &catID, &catNameV, &l.Icon, &l.Total,
 			&l.Synced, &l.Source, &l.RecordedBy); err != nil {
 			http.Error(w, "scan pending: "+err.Error(), 500)
 			return
