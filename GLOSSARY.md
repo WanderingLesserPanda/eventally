@@ -201,3 +201,26 @@ owner or an admin, which leaves a tombstone row. Voiding is not logged here —
 void events live in History (D31).
 _Avoid_: history (History records created/edited/voided events — deletions
 live here)
+
+### Icons (D32)
+
+**Icon key**:
+The string stored in `category.icon` / `account.icon` — the glyph's class
+name (e.g. `la-coffee`) from the icon registry. NULL means unpicked: the
+default icon renders. A key is stable identity, never a position or a code
+point.
+_Avoid_: icon ID, icon index, glyph code
+
+**Icon registry**:
+The curated, code-managed list of selectable glyphs (one Go file,
+domain-grouped). It is the single source of truth for the picker UI, the
+renderer, and app-side validation. Expanding it is a file edit — no
+migration, no DB table.
+_Avoid_: icon table (there is no DB table), icon set (ambiguous — the
+registry is the selectable subset of the font)
+
+**Default icon**:
+What renders when an icon is unpicked (`icon IS NULL`) or the stored key is
+unknown: the `tag` glyph for categories; a per-account-type glyph for
+accounts.
+_Avoid_: fallback (implies an error path), placeholder
