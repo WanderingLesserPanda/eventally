@@ -155,27 +155,9 @@ func containsStr(list []string, v string) bool {
 	return false
 }
 
-// acctIcon is the per-account-type glyph used in the accounts grid.
-func acctIcon(t string) string {
-	switch t {
-	case "savings":
-		return "🏦"
-	case "ewallet":
-		return "📱"
-	case "credit_card":
-		return "💳"
-	case "loan":
-		return "🧾"
-	case "investment":
-		return "📈"
-	case "cash":
-		return "💵"
-	case "credits":
-		return "🎟️"
-	default:
-		return "💠"
-	}
-}
+// acctIcon (the per-account-type emoji lookup) is retired by D32: account
+// glyphs come from the icon registry (icons.go) — acctIcon(stored, type)
+// renders the picked glyph or the per-type default.
 
 // acctTypeLabel is the human-facing account type name.
 func acctTypeLabel(t string) string {

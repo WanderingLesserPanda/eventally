@@ -35,8 +35,9 @@ func New(pool *pgxpool.Pool, tmplDir, dataDir string) (*App, error) {
 		"orDash": orDash,
 		"hasPrefix": hasPrefix,
 	"contains":  containsStr,
-	"icon":      acctIcon,
-	"humanType": acctTypeLabel,
+	"catIcon":     catIcon,
+	"acctIcon":    acctIcon,
+	"humanType":   acctTypeLabel,
 	"utilPct":   utilPct,
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseGlob(filepath.Join(tmplDir, "*.html"))

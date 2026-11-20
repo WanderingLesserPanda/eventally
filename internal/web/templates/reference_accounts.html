@@ -34,7 +34,7 @@
       {{if and .Active (not .IsChild) (not .IsCredit)}}
       <a class="acct-card" href="/accounts/{{.ID}}">
         <div class="acct-top">
-          <span class="acct-ic">{{icon .Type}}</span>
+          <span class="acct-ic">{{acctIcon "" .Type}}</span>
           <div class="acct-id">
             <span class="acct-name">{{.Name}}{{if .Institution}}<span class="acct-inst">{{.Institution}}</span>{{end}}</span>
             <span class="acct-sub">{{humanType .Type}}{{if .Children}} · {{.Children}} card{{if ne .Children 1}}s{{end}} in this family{{end}}</span>
@@ -52,7 +52,7 @@
       {{if and .Active (not .IsChild) .IsCredit}}
       <a class="acct-card liab" href="/accounts/{{.ID}}">
         <div class="acct-top">
-          <span class="acct-ic">{{icon .Type}}</span>
+          <span class="acct-ic">{{acctIcon "" .Type}}</span>
           <div class="acct-id">
             <span class="acct-name">{{.Name}}{{if .Institution}}<span class="acct-inst">{{.Institution}}</span>{{end}}</span>
             <span class="acct-sub">{{humanType .Type}}{{if .CardType}} · {{.CardType}}{{if .ParentName}} · of {{.ParentName}}{{end}}{{end}}</span>
@@ -79,7 +79,7 @@
       {{if not .Active}}
       <a class="acct-card muted-card" href="/accounts/{{.ID}}">
         <div class="acct-top">
-          <span class="acct-ic">{{icon .Type}}</span>
+          <span class="acct-ic">{{acctIcon "" .Type}}</span>
           <div class="acct-id">
             <span class="acct-name">{{.Name}}{{if .Institution}}<span class="acct-inst">{{.Institution}}</span>{{end}}</span>
             <span class="acct-sub">{{humanType .Type}} · inactive</span>
