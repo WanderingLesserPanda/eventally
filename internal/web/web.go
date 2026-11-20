@@ -318,7 +318,7 @@ func (a *App) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth.SetSessionCookie(w, sess.ID)
-	http.Redirect(w, r, auth.RefererOrFallback(r, "/"), http.StatusSeeOther)
+	http.Redirect(w, r, auth.PostLoginDest(r), http.StatusSeeOther)
 }
 
 // handleLogout ends the session.

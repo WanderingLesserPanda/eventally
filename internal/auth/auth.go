@@ -276,3 +276,17 @@ func RefererOrFallback(r *http.Request, fallback string) string {
 	}
 	return u.String()
 }
+
+// PostLoginDest picks where a successful login redirects. It honours a
+// same-site Referer — except when that Referer IS an auth page: a browser
+// always sends Referer: <site>/login when the form at /login is submitted,
+// and honouring it bounces the user right back to the login form ("login
+// sticks on the login form" field bug, 2026-11-20). The fallback dashboard
+// is the only sensible landing from the login form itself.
+func PostLoginDest(r *http.Request) string {
+	dest := RefererOrFallback(r, "/")
+	if u, err := url.Parse(dest); err == nil && (u.Path == "/login" || u.Path == "/setup") {
+		return "/"
+	}
+	return dest
+}

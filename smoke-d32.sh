@@ -159,6 +159,13 @@ PENDING="$(sql "SELECT id FROM \"transaction\" WHERE description='coffee pending
 APPROVED="$(sql "SELECT id FROM \"transaction\" WHERE description='coffee'")"
 
 login u; login m; login e
+# Browser-equivalent login: the browser always sends Referer: <site>/login
+# when the form at /login is submitted; the 303 after a successful login must
+# land on the dashboard, not bounce back to the form (field bug 2026-11-20).
+LOC="$(curl -s -D - -o /dev/null -e "$BASE/login" -c "$JARS/refer" \
+  -d "username=u&password=smoke-pass" "$BASE/login" | tr -d '\r' | sed -n 's/^Location: //Ip')"
+[[ "$LOC" == "/" ]] || fail "login with Referer /login redirected to '${LOC:-<none>}', want /"
+echo "ok  login with the browser's Referer lands on the dashboard (not the form)"
 
 echo "==> 1. vendored Line Awesome serves (CSS + fonts, MIT license)"
 code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/static/lineawesome/css/line-awesome.min.css")"
