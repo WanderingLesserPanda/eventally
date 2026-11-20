@@ -103,7 +103,9 @@ code-managed registry.
   row now shows the default `la-tag` glyph followed by "(use default)"
   (data-label unchanged so search still matches it); the account row stays
   text-only because its default is per account type; picker cells enlarged
-  to 56px / 1.75rem (8 per row) and the chip to 36px.
+  to 56px / 1.75rem (8 per row) and the chip to 36px. The row's la-tag glyph
+  renders at the picker's full 1.75rem cell size (follow-up: the 0.82rem
+  row label initially shrank the glyph too — user requested consistency).
 
 ## §E Picker UX (R2.5 mockup, approved for MVP)
 

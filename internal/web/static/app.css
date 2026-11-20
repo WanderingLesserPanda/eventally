@@ -371,6 +371,8 @@ a.hh-item { cursor: pointer; }
 .icon-cell:hover { background: #eef1f6; }
 .icon-cell.selected { border-color: var(--accent); background: #e8f0fe; color: var(--accent); }
 /* The "No icon (use default)" row: category forms show the default la-tag
-   glyph + "(use default)" text; account forms keep the text-only label. */
+   glyph + "(use default)" text; account forms keep the text-only label.
+   The glyph renders at the picker's full cell size (1.75rem, matching
+   .icon-cell); the row's 0.82rem font-size only sizes the label text. */
 .icon-cell-none { width: auto; padding: 0 0.7rem; font-size: 0.82rem; font-weight: 500; }
-.icon-cell-none .la { margin-right: 0.35rem; }
+.icon-cell-none .la { margin-right: 0.35rem; font-size: 1.75rem; }
