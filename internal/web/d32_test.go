@@ -81,7 +81,7 @@ func TestD32RegistryComplete(t *testing.T) {
 		t.Fatalf("registry spans %d groups, want 11 (§H)", groupCount)
 	}
 	// Every key must exist in the vendored CSS.
-	cssPath := filepath.Join("static", "lineawesome", "line-awesome.min.css")
+	cssPath := filepath.Join("static", "lineawesome", "css", "line-awesome.min.css")
 	css, err := os.ReadFile(cssPath)
 	if err != nil {
 		t.Fatalf("read vendored CSS: %v", err)
@@ -217,7 +217,7 @@ func TestD32CategoryIconAnyMember(t *testing.T) {
 		t.Fatalf("category form GET: %d", recGet.Code)
 	}
 	body := recGet.Body.String()
-	if !strings.Contains(body, "/static/lineawesome/line-awesome.min.css") {
+	if !strings.Contains(body, "/static/lineawesome/css/line-awesome.min.css") {
 		t.Fatal("layout does not link the vendored Line Awesome CSS")
 	}
 	cells := strings.Count(body, `class="icon-cell" data-key="la-`)

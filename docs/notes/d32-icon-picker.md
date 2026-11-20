@@ -80,6 +80,11 @@ code-managed registry.
   woff2), `line-awesome.min.css`, and `LICENSE.txt` (MIT, Icons8).
 - Same pattern as the already-vendored alpine.min.js / htmx.min.js —
   served through the existing static route, no new web-stack dependency.
+- 2026-11-20 fix (broken icons in the live image): the CSS lives at
+  `lineawesome/css/line-awesome.min.css` — Line Awesome's own dist
+  layout — so its `url(../fonts/…)` references resolve to
+  `lineawesome/fonts/`. Vendor files stay byte-identical to upstream;
+  smoke-d32.sh now asserts the browser-resolved font URLs serve 200.
 
 ## §E Picker UX (R2.5 mockup, approved for MVP)
 

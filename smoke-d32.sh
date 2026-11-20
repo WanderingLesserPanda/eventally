@@ -161,10 +161,38 @@ APPROVED="$(sql "SELECT id FROM \"transaction\" WHERE description='coffee'")"
 login u; login m; login e
 
 echo "==> 1. vendored Line Awesome serves (CSS + fonts, MIT license)"
-code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/static/lineawesome/line-awesome.min.css")"
+code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/static/lineawesome/css/line-awesome.min.css")"
 [[ "$code" == "200" ]] || fail "line-awesome.min.css: HTTP $code"
-css="$(curl -s "$BASE/static/lineawesome/line-awesome.min.css")"
+css="$(curl -s "$BASE/static/lineawesome/css/line-awesome.min.css")"
 [[ "$css" == *Line\ Awesome* ]] || fail "CSS content missing"
+# Regression (2026-11-20 live report): the CSS references its fonts
+# relatively (../fonts/), so assert the URLs the BROWSER actually
+# resolves — not just the fonts' canonical paths. Modern browsers only
+# fetch woff/woff2, so that is the set we require to serve.
+# resolve_ref DIR REF: resolve REF (possibly containing ../) against DIR.
+# DIR must be a bare path (no scheme/host) — curl gets $BASE prepended.
+resolve_ref() {
+  local dir="$1" ref="$2" part
+  local -a stack=(${dir//\// })
+  ref="${ref#./}"
+  for part in ${ref//\// }; do
+    case "$part" in
+      "") ;;
+      ..) unset 'stack[-1]' ;;
+      *) stack+=("$part") ;;
+    esac
+  done
+  (IFS=/; echo "/${stack[*]}")
+}
+cssdir="/static/lineawesome/css"
+badrefs=""
+for ref in $(echo "$css" | grep -o 'url([^)]*)' | sed 's/^url(//; s/)$//' | tr -d '"'); do
+  case "$ref" in *woff) ;; *) continue ;; esac
+  p="$(resolve_ref "$cssdir" "$ref")"
+  code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE$p" || true)"
+  [[ "$code" == "200" ]] || badrefs="$badrefs $ref(->$p:$code)"
+done
+[[ -z "$badrefs" ]] || fail "font url() refs unresolved:$badrefs"
 code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/static/lineawesome/fonts/la-solid-900.woff2")"
 [[ "$code" == "200" ]] || fail "solid woff2 font: HTTP $code"
 code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/static/lineawesome/LICENSE.txt")"
@@ -174,7 +202,7 @@ echo "==> 2. category form: picker markup (296 glyphs + No-icon row + CSS link)"
 CATFORM="$(page u /categories/new)"
 # Note: bash string matching, not `echo | grep -q` — the page is >64KB and
 # grep -q's early exit would SIGPIPE the writer under pipefail.
-[[ "$CATFORM" == *'/static/lineawesome/line-awesome.min.css'* ]] || fail "category form: LA css link missing"
+[[ "$CATFORM" == *'/static/lineawesome/css/line-awesome.min.css'* ]] || fail "category form: LA css link missing"
 CELLS="$(echo "$CATFORM" | grep -o 'class="icon-cell" data-key="la-' | wc -l)"
 [[ "$CELLS" == "296" ]] || fail "category picker cells $CELLS, want 296"
 [[ "$CATFORM" == *'data-label="no icon (use default)"'* ]] || fail "picker missing 'No icon (use default)' row"
