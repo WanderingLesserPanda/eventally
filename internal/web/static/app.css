@@ -342,9 +342,9 @@ a.hh-item { cursor: pointer; }
 /* The preview chip beside the "Choose icon" button on the category and
    account forms: the picked glyph, or the default hint when unpicked. */
 .icon-chip {
-  width: 30px; height: 30px; border-radius: 8px; background: #eef1f6;
+  width: 36px; height: 36px; border-radius: 8px; background: #eef1f6;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 1rem; flex: none; vertical-align: middle;
+  font-size: 1.25rem; flex: none; vertical-align: middle;
 }
 /* The "Icon" row on the category and account forms. */
 .icon-field {
@@ -362,10 +362,10 @@ a.hh-item { cursor: pointer; }
   text-transform: uppercase; color: var(--muted); margin: 0.8rem 0 0.3rem;
 }
 .icon-group:first-child .icon-group-name { margin-top: 0; }
-.icon-cells { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.icon-cells { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .icon-cell {
-  width: 42px; height: 42px; border-radius: 8px; border: 1px solid transparent;
-  background: none; color: var(--ink); font-size: 1.15rem; cursor: pointer;
+  width: 56px; height: 56px; border-radius: 8px; border: 1px solid transparent;
+  background: none; color: var(--ink); font-size: 1.75rem; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; padding: 0;
 }
 .icon-cell:hover { background: #eef1f6; }

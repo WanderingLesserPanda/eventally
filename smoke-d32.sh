@@ -214,6 +214,13 @@ code="$(post m /categories --csrf-src=/categories/new \
   --data-urlencode "icon=la-pizza-slice")"
 [[ "$code" == "303" ]] || fail "member category create: HTTP $code"
 [[ "$(sql "SELECT icon FROM category WHERE name='Snacks'")" == "la-pizza-slice" ]] || fail "icon not persisted"
+# Brand-family glyph (Line Awesome Brands font) — must be storable too.
+code="$(post m /categories --csrf-src=/categories/new \
+  --data-urlencode "name=Crypto" --data-urlencode "transaction_class=expense" \
+  --data-urlencode "icon=la-ethereum")"
+[[ "$code" == "303" ]] || fail "member category create (brand icon): HTTP $code"
+[[ "$(sql "SELECT icon FROM category WHERE name='Crypto'")" == "la-ethereum" ]] || fail "brand icon not persisted"
+CRYPTO="$(sql "SELECT id FROM category WHERE name='Crypto'")"
 
 echo "==> 4. unknown icon key rejected (form error, no row)"
 body="$(curl -s -b "$JARS/m" --data-urlencode "csrf=$(csrf m /categories/new)" \
@@ -279,6 +286,11 @@ has u /accounts 'la-mobile-alt'
 has u /cards 'la-coins'
 # Txn-form category select carries the category icons.
 has u /txns/new 'la-mug-hot'
+# Brand glyphs render with the lab style class (Line Awesome Brands font) —
+# regression for blank ethereum/apple-pay in the live image (2026-11-20):
+# the solid Free font has no brand codepoints, so the class must select lab.
+has u /categories/new 'class="lab la-ethereum"'
+has u "/categories/$CRYPTO" "iconPicker('la-ethereum', 'lab')"
 # No emoji glyphs anywhere on the accounts grid (grep -P without -q:
 # -q would early-exit and SIGPIPE the writer under pipefail on big pages).
 ACCPAGE="$(page u /accounts)"

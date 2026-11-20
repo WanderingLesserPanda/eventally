@@ -1,5 +1,5 @@
 {{define "page/reference_category_form"}}
-<div class="card" x-data="iconPicker('{{.F.Icon}}')">
+<div class="card" x-data="iconPicker('{{.F.Icon}}', '{{iconStyle .F.Icon}}')">
   <h1>{{if .Editing}}Edit category{{else}}New category{{end}}</h1>
   {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
   <form method="post" action="{{if .Editing}}/categories/{{.F.ID}}{{else}}/categories{{end}}">
@@ -28,7 +28,7 @@
     <div class="icon-field">
       <span>Icon</span>
       <button type="button" class="btn" @click="pOpen = true; setTimeout(() => this.$refs.pSearch.focus(), 50)">Choose…</button>
-      <span class="icon-chip" x-show="pKey" x-cloak><i class="la" :class="pKey"></i></span>
+      <span class="icon-chip" x-show="pKey" x-cloak><i :class="pStyle + ' ' + pKey"></i></span>
       <span class="muted small" x-show="!pKey" x-cloak>default</span>
     </div>
     <input type="hidden" name="icon" x-ref="iconInput" :value="pKey">
@@ -48,8 +48,8 @@
             <div class="icon-group-name">{{$g.Name}}</div>
             <div class="icon-cells">
               {{range $g.Glyphs}}
-              <button type="button" class="icon-cell" data-key="{{.Key}}" data-label="{{.Label}} {{$g.Name}}" title="{{.Label}}" @click="pSel('{{.Key}}')" :class="{ selected: pKey === '{{.Key}}' }">
-                <i class="la {{.Key}}"></i>
+              <button type="button" class="icon-cell" data-key="{{.Key}}" data-label="{{.Label}} {{$g.Name}}" title="{{.Label}}" @click="pSel('{{.Key}}', '{{iconStyle .Key}}')" :class="{ selected: pKey === '{{.Key}}' }">
+                <i class="{{iconStyle .Key}} {{.Key}}"></i>
               </button>
               {{end}}
             </div>

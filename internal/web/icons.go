@@ -418,11 +418,39 @@ func resolveAccountIcon(stored, typ string) string {
 	return accountIconDefault(typ)
 }
 
+// brandGlyphs lists the registry keys whose glyph lives in the Line Awesome
+// Brands font rather than the Free solid font. Derived 2026-11-20 by reading
+// the vendored woff2 cmaps (10 of the 296 keys). The style class selects the
+// font family (vendor CSS: .la = Free 900, .lar = Free 400, .lab = Brands
+// 400); rendering a brand key with the plain "la" class loads the solid
+// font, which lacks the glyph, so the icon renders as a blank box.
+var brandGlyphs = map[string]bool{
+	"la-bitcoin":       true,
+	"la-bluetooth":     true,
+	"la-cc-amex":       true,
+	"la-cc-apple-pay":  true,
+	"la-cc-discover":   true,
+	"la-cc-mastercard": true,
+	"la-cc-paypal":     true,
+	"la-cc-stripe":     true,
+	"la-cc-visa":       true,
+	"la-ethereum":      true,
+}
+
+// iconStyle returns the LA style class for a key: the font family that
+// actually contains the key's glyph.
+func iconStyle(key string) string {
+	if brandGlyphs[key] {
+		return "lab"
+	}
+	return "la"
+}
+
 // iconTag renders a resolved glyph key as an <i> element. Keys reach here
 // only through resolve* (registry membership checked), so the key is a
 // registry token, never free user input.
 func iconTag(key string) template.HTML {
-	return template.HTML(`<i class="la ` + html.EscapeString(key) + `"></i>`)
+	return template.HTML(`<i class="` + iconStyle(key) + ` ` + html.EscapeString(key) + `"></i>`)
 }
 
 // iconOrNil maps the form value to its DB value: "" (unpicked) → NULL.

@@ -14,11 +14,12 @@
      icon input; "No icon (use default)" clears it. -->
 <script>
 document.addEventListener('alpine:init', () => {
-  Alpine.data('iconPicker', (picked) => ({
+  Alpine.data('iconPicker', (pickedKey, pickedStyle) => ({
     pOpen: false,
-    pKey: picked || '',
+    pKey: pickedKey || '',
+    pStyle: pickedStyle || 'la',
     pQ: '',
-    pSel(key) { this.pKey = key; },
+    pSel(key, style) { this.pKey = key; this.pStyle = style || 'la'; },
     pFilter() {
       const q = this.pQ.trim().toLowerCase();
       const modal = this.$el.querySelector('.icon-modal');

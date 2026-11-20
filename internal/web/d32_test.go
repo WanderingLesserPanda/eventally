@@ -227,7 +227,7 @@ func TestD32CategoryIconAnyMember(t *testing.T) {
 	if !strings.Contains(body, `data-label="no icon (use default)"`) {
 		t.Fatal("picker missing the 'No icon (use default)' row")
 	}
-	if !strings.Contains(body, `iconPicker('la-leaf')`) {
+	if !strings.Contains(body, `iconPicker('la-leaf', 'la')`) {
 		t.Fatal("picker not preselected with the stored key")
 	}
 }
@@ -319,5 +319,51 @@ func TestD32AccountIconNeedsEditGrant(t *testing.T) {
 	}
 	if v := getIcon(); v == nil || *v != "la-wallet" {
 		t.Fatalf("rejected key overwrote icon: %v", v)
+	}
+}
+
+// TestD32BrandStyle: brand glyphs must render with the lab style class,
+// which selects the Line Awesome Brands font. Regression (2026-11-20 live
+// report): ethereum/apple-pay rendered blank because the plain la class
+// loads the solid Free font, which has no brand codepoints. The brand set
+// was derived from the vendored woff2 cmaps and is pinned here.
+func TestD32BrandStyle(t *testing.T) {
+	brands := []string{
+		"la-bitcoin", "la-bluetooth", "la-cc-amex", "la-cc-apple-pay",
+		"la-cc-discover", "la-cc-mastercard", "la-cc-paypal", "la-cc-stripe",
+		"la-cc-visa", "la-ethereum",
+	}
+	brandSet := make(map[string]bool, len(brands))
+	for _, k := range brands {
+		brandSet[k] = true
+		if got := iconStyle(k); got != "lab" {
+			t.Fatalf("iconStyle(%s) = %q, want lab", k, got)
+		}
+		if h := string(iconTag(k)); h != `<i class="lab `+k+`"></i>` {
+			t.Fatalf("iconTag(%s) = %s, want lab-prefixed", k, h)
+		}
+	}
+	// Every registry key classifies to exactly one style; non-brands solid.
+	for _, g := range iconEntries {
+		want := "la"
+		if brandSet[g.Key] {
+			want = "lab"
+		}
+		if got := iconStyle(g.Key); got != want {
+			t.Fatalf("iconStyle(%s) = %q, want %q", g.Key, got, want)
+		}
+	}
+	if n := len(brandGlyphs); n != len(brands) {
+		t.Fatalf("brandGlyphs has %d keys, test pins %d", n, len(brands))
+	}
+	// The vendor CSS actually assigns the Brands family to .lab (if a future
+	// re-vendor drops this, the lab class would silently render nothing).
+	cssPath := filepath.Join("static", "lineawesome", "css", "line-awesome.min.css")
+	css, err := os.ReadFile(cssPath)
+	if err != nil {
+		t.Fatalf("read vendored CSS: %v", err)
+	}
+	if !strings.Contains(string(css), `.lab{font-family:'Line Awesome Brands'}`) {
+		t.Fatal("vendor CSS no longer assigns the Brands family to .lab")
 	}
 }

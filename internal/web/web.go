@@ -36,6 +36,7 @@ func New(pool *pgxpool.Pool, tmplDir, dataDir string) (*App, error) {
 		"hasPrefix": hasPrefix,
 		"contains":  containsStr,
 		"catIcon":   catIcon,
+		"iconStyle": iconStyle,
 		"acctIcon":  acctIcon,
 		"humanType": acctTypeLabel,
 		"utilPct":   utilPct,

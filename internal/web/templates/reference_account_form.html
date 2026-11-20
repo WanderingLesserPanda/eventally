@@ -1,5 +1,5 @@
 {{define "page/reference_account_form"}}
-<div class="card" x-data="Object.assign(iconPicker('{{.F.Icon}}'), { archiveOpen: false, restoreOpen: false, deleteOpen: false })">
+<div class="card" x-data="Object.assign(iconPicker('{{.F.Icon}}', '{{iconStyle .F.Icon}}'), { archiveOpen: false, restoreOpen: false, deleteOpen: false })">
   <div class="page-head">
     <h1>{{if .Editing}}Edit account{{else}}New account{{end}}</h1>
     {{if and .Editing .Lifecycle}}
@@ -73,7 +73,7 @@
     <div class="icon-field">
       <span>Icon</span>
       <button type="button" class="btn" @click="pOpen = true; setTimeout(() => this.$refs.pSearch.focus(), 50)">Choose…</button>
-      <span class="icon-chip" x-show="pKey" x-cloak><i class="la" :class="pKey"></i></span>
+      <span class="icon-chip" x-show="pKey" x-cloak><i :class="pStyle + ' ' + pKey"></i></span>
       <span class="muted small" x-show="!pKey" x-cloak>default for type</span>
     </div>
     <input type="hidden" name="icon" x-ref="iconInput" :value="pKey">
@@ -93,8 +93,8 @@
             <div class="icon-group-name">{{$g.Name}}</div>
             <div class="icon-cells">
               {{range $g.Glyphs}}
-              <button type="button" class="icon-cell" data-key="{{.Key}}" data-label="{{.Label}} {{$g.Name}}" title="{{.Label}}" @click="pSel('{{.Key}}')" :class="{ selected: pKey === '{{.Key}}' }">
-                <i class="la {{.Key}}"></i>
+              <button type="button" class="icon-cell" data-key="{{.Key}}" data-label="{{.Label}} {{$g.Name}}" title="{{.Label}}" @click="pSel('{{.Key}}', '{{iconStyle .Key}}')" :class="{ selected: pKey === '{{.Key}}' }">
+                <i class="{{iconStyle .Key}} {{.Key}}"></i>
               </button>
               {{end}}
             </div>

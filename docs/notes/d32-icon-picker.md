@@ -85,6 +85,12 @@ code-managed registry.
   layout — so its `url(../fonts/…)` references resolve to
   `lineawesome/fonts/`. Vendor files stay byte-identical to upstream;
   smoke-d32.sh now asserts the browser-resolved font URLs serve 200.
+- 2026-11-20 fix (blank brand icons): the renderer emits the style class
+  of the font that contains each glyph — `lab` (Line Awesome Brands) for
+  the 10 brand keys (bitcoin, bluetooth, ethereum, 7 cc-* payment
+  brands), `la` (Free solid) for the rest. The brand set was derived by
+  reading the vendored woff2 cmaps and is pinned by TestD32BrandStyle;
+  rendering a brand key with `la` loads a font that lacks the codepoint.
 
 ## §E Picker UX (R2.5 mockup, approved for MVP)
 
