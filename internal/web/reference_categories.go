@@ -25,16 +25,20 @@ type Category struct {
 	HasBudget  bool
 	Budgetable bool
 	Active     bool
+	// Icon is the D32 picked glyph key (la-*) from the registry; "" = unpicked.
+	Icon string
 }
 
 // categorySelect lists columns with c.* qualified for the list query
 // (which joins the parent). The edit handler uses its own unqualified
 // SELECT against the single row.
 const categorySelectList = `c.id, c.name, COALESCE(c.parent_id, 0), COALESCE(p.name, ''), c.transaction_class,
-	COALESCE(c.budget_per_month, 0), c.budget_per_month IS NOT NULL, c.is_budgetable, c.is_active`
+	COALESCE(c.budget_per_month, 0), c.budget_per_month IS NOT NULL, c.is_budgetable, c.is_active,
+	COALESCE(c.icon, '')`
 
 const categorySelectOne = `id, name, COALESCE(parent_id, 0), '', transaction_class,
-	COALESCE(budget_per_month, 0), budget_per_month IS NOT NULL, is_budgetable, is_active`
+	COALESCE(budget_per_month, 0), budget_per_month IS NOT NULL, is_budgetable, is_active,
+	COALESCE(icon, '')`
 
 var categoryClasses = []string{"expense", "income", "transfer"}
 
@@ -52,7 +56,7 @@ func (a *App) listCategories(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c Category
 		if err := rows.Scan(&c.ID, &c.Name, &c.ParentID, &c.ParentName, &c.Class,
-			&c.Budget, &c.HasBudget, &c.Budgetable, &c.Active); err != nil {
+			&c.Budget, &c.HasBudget, &c.Budgetable, &c.Active, &c.Icon); err != nil {
 			http.Error(w, "scan category: "+err.Error(), 500)
 			return
 		}
@@ -93,11 +97,12 @@ func (a *App) categoryParentOptions(ctx context.Context, hh, excludeID int64) []
 
 func (a *App) renderCategoryForm(w http.ResponseWriter, r *http.Request, f CategoryForm) {
 	a.render(w, r, http.StatusOK, "reference_category_form.html", map[string]any{
-		"Title":   "Category form",
-		"Section": "categories",
-		"F":       f,
-		"Classes": categoryClasses,
-		"Editing": f.ID > 0,
+		"Title":      "Category form",
+		"Section":    "categories",
+		"F":          f,
+		"Classes":    categoryClasses,
+		"Editing":    f.ID > 0,
+		"IconGroups": iconGroups(),
 	})
 }
 
@@ -128,6 +133,12 @@ func (a *App) parseCategoryForm(r *http.Request, f CategoryForm) CategoryForm {
 			return f
 		}
 		f.Budget, f.HasBudget = m, true
+	}
+	// D32: icon glyph key — validated against the registry; "" = unpicked.
+	f.Icon = strings.TrimSpace(r.FormValue("icon"))
+	if f.Icon != "" && !iconValid(f.Icon) {
+		f.Err = "Unknown icon."
+		return f
 	}
 	return f
 }
@@ -180,9 +191,9 @@ func (a *App) handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
 		budget = f.Budget
 	}
 	_, err := a.Pool.Exec(r.Context(),
-		`INSERT INTO category (household_id, name, parent_id, transaction_class, budget_per_month, is_budgetable)
-		 VALUES ($1,$2,$3,$4,$5,$6)`,
-		hh, f.Name, parentID, f.Class, budget, f.Budgetable)
+		`INSERT INTO category (household_id, name, parent_id, transaction_class, budget_per_month, is_budgetable, icon)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		hh, f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon))
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "A category with this name already exists."
@@ -209,7 +220,7 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 	err := a.Pool.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM category WHERE id = $2 AND household_id = $1`, categorySelectOne), hh, id).
 		Scan(&cur.ID, &cur.Name, &cur.ParentID, &cur.ParentName, &cur.Class,
-			&cur.Budget, &cur.HasBudget, &cur.Budgetable, &cur.Active)
+			&cur.Budget, &cur.HasBudget, &cur.Budgetable, &cur.Active, &cur.Icon)
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.Error(w, "not found", 404)
 		return
@@ -249,8 +260,8 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = a.Pool.Exec(ctx,
 		`UPDATE category SET name=$1, parent_id=$2, transaction_class=$3,
-		 budget_per_month=$4, is_budgetable=$5 WHERE id=$6 AND household_id=$7`,
-		f.Name, parentID, f.Class, budget, f.Budgetable, id, hh)
+		 budget_per_month=$4, is_budgetable=$5, icon=$6 WHERE id=$7 AND household_id=$8`,
+		f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon), id, hh)
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "A category with this name already exists."

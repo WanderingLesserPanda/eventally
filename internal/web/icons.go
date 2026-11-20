@@ -425,6 +425,14 @@ func iconTag(key string) template.HTML {
 	return template.HTML(`<i class="la ` + html.EscapeString(key) + `"></i>`)
 }
 
+// iconOrNil maps the form value to its DB value: "" (unpicked) → NULL.
+func iconOrNil(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // catIcon is the category template function (dashboard, /txns, review,
 // forms): the picked glyph, or the tag default.
 func catIcon(stored string) template.HTML {

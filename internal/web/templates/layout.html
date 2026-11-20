@@ -9,6 +9,36 @@
 <link rel="stylesheet" href="/static/lineawesome/line-awesome.min.css">
 <script src="/static/htmx.min.js" defer></script>
 <script src="/static/alpine.min.js" defer></script>
+<!-- D32: icon picker component (docs/notes/d32-icon-picker.md §E) — search
+     filters by glyph label + group name; "Save" commits to the hidden
+     icon input; "No icon (use default)" clears it. -->
+<script>
+document.addEventListener('alpine:init', () => {
+  Alpine.data('iconPicker', (picked) => ({
+    pOpen: false,
+    pKey: picked || '',
+    pQ: '',
+    pSel(key) { this.pKey = key; },
+    pFilter() {
+      const q = this.pQ.trim().toLowerCase();
+      const modal = this.$el.querySelector('.icon-modal');
+      modal.querySelectorAll('.icon-group').forEach((g) => {
+        let any = false;
+        g.querySelectorAll('.icon-cell').forEach((c) => {
+          const hit = !q || c.dataset.label.toLowerCase().includes(q);
+          c.style.display = hit ? '' : 'none';
+          if (hit) any = true;
+        });
+        g.style.display = any ? '' : 'none';
+      });
+    },
+    pCommit() {
+      this.$refs.iconInput.value = this.pKey;
+      this.pOpen = false;
+    },
+  }));
+});
+</script>
 </head>
 <body{{if eq .Path "/setup"}} class="setup-page"{{end}}>
 {{if .Session}}

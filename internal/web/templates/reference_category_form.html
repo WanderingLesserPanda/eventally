@@ -1,5 +1,5 @@
 {{define "page/reference_category_form"}}
-<div class="card">
+<div class="card" x-data="iconPicker('{{.F.Icon}}')">
   <h1>{{if .Editing}}Edit category{{else}}New category{{end}}</h1>
   {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
   <form method="post" action="{{if .Editing}}/categories/{{.F.ID}}{{else}}/categories{{end}}">
@@ -24,6 +24,44 @@
       </label>
     </div>
     <label class="checkline"><input type="checkbox" name="budgetable" {{if .F.Budgetable}}checked{{end}}> Counted in budget reports</label>
+    <!-- D32: icon picker (docs/notes/d32-icon-picker.md §E) -->
+    <div class="icon-field">
+      <span>Icon</span>
+      <button type="button" class="btn" @click="pOpen = true; setTimeout(() => this.$refs.pSearch.focus(), 50)">Choose…</button>
+      <span class="icon-chip" x-show="pKey" x-cloak><i class="la" :class="pKey"></i></span>
+      <span class="muted small" x-show="!pKey" x-cloak>default</span>
+    </div>
+    <input type="hidden" name="icon" x-ref="iconInput" :value="pKey">
+    <div x-show="pOpen" x-cloak class="hh-modal-backdrop" @click.self="pOpen = false">
+      <div class="hh-modal icon-modal" role="dialog" aria-modal="true" aria-label="Choose an icon">
+        <h3>Choose an icon</h3>
+        <input type="search" class="icon-search" x-ref="pSearch" x-model="pQ" @input="pFilter()" placeholder="Search icons and groups…">
+        <div class="icon-grid">
+          <div class="icon-group" data-group="Default">
+            <div class="icon-group-name">Default</div>
+            <div class="icon-cells">
+              <button type="button" class="icon-cell icon-cell-none" data-key="" data-label="no icon (use default)" @click="pSel('')" :class="{ selected: pKey === '' }">No icon (use default)</button>
+            </div>
+          </div>
+          {{range $g := .IconGroups}}
+          <div class="icon-group" data-group="{{$g.Name}}">
+            <div class="icon-group-name">{{$g.Name}}</div>
+            <div class="icon-cells">
+              {{range $g.Glyphs}}
+              <button type="button" class="icon-cell" data-key="{{.Key}}" data-label="{{.Label}} {{$g.Name}}" title="{{.Label}}" @click="pSel('{{.Key}}')" :class="{ selected: pKey === '{{.Key}}' }">
+                <i class="la {{.Key}}"></i>
+              </button>
+              {{end}}
+            </div>
+          </div>
+          {{end}}
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-primary" @click="pCommit()">Save</button>
+          <button type="button" class="btn-link" @click="pOpen = false">Cancel</button>
+        </div>
+      </div>
+    </div>
     <div class="form-actions">
       <button type="submit" class="btn-primary">{{if .Editing}}Save{{else}}Create{{end}}</button>
       <a class="btn" href="/categories">Cancel</a>

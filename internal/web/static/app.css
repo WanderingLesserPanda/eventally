@@ -346,8 +346,13 @@ a.hh-item { cursor: pointer; }
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 1rem; flex: none; vertical-align: middle;
 }
+/* The "Icon" row on the category and account forms. */
+.icon-field {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin-bottom: 0.9rem; font-weight: 600; font-size: 0.85rem;
+}
 /* The picker modal is wider than a confirmation modal and scrolls. */
-.icon-modal { max-width: 34rem; display: flex; flex-direction: column; gap: 0.8rem; }
+.icon-modal { max-width: 34rem; margin: 8vh auto; display: flex; flex-direction: column; gap: 0.8rem; }
 .icon-modal .icon-search { width: 100%; margin: 0; }
 .icon-grid {
   max-height: 50vh; overflow-y: auto; padding-right: 0.3rem;

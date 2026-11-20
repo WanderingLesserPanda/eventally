@@ -88,29 +88,31 @@ type Account struct {
 	OpeningDate  string
 	Active       bool
 	Notes        string
-	ParentID     int64
-	ParentName   string
-	CreatedBy    int64 // created_by_user_id (household-level created-mode checks, R5)
+	// Icon is the D32 picked glyph key (la-*) from the registry; "" = unpicked.
+	Icon       string
+	ParentID   int64
+	ParentName string
+	CreatedBy  int64 // created_by_user_id (household-level created-mode checks, R5)
 }
 
 // accountListRow is one card in the accounts grid: the stored account
 // plus its live ledger balance (opening + activity since).
 type accountListRow struct {
 	Account
-	Live      money.Money
-	HasLive   bool
-	IsCredit  bool // liability account: balance reads as owed, not owned
-	IsChild   bool // supplementary card hidden from the top-level grid
-	Utilized  float64 // credit cards only: balance/limit, 0..1+
-	Children  int    // card family: supplementary cards under this parent
+	Live     money.Money
+	HasLive  bool
+	IsCredit bool    // liability account: balance reads as owed, not owned
+	IsChild  bool    // supplementary card hidden from the top-level grid
+	Utilized float64 // credit cards only: balance/limit, 0..1+
+	Children int     // card family: supplementary cards under this parent
 }
 
 // accountSummary is the top-of-page strip: what the household owns,
 // owes, and has in total, across active accounts.
 type accountSummary struct {
-	Assets    money.Money
+	Assets      money.Money
 	Liabilities money.Money
-	NetWorth  money.Money
+	NetWorth    money.Money
 	ActiveCount int
 }
 
@@ -119,7 +121,7 @@ const accountSelect = `a.id, a.name, a.institution, a.account_type, a.balance_ty
 	COALESCE(a.statement_day, 0), a.statement_day IS NOT NULL,
 	COALESCE(a.payment_due_day, 0), a.payment_due_day IS NOT NULL,
 	a.opening_balance, COALESCE(to_char(a.opening_balance_date, 'YYYY-MM-DD'), ''), a.is_active, a.notes,
-	COALESCE(a.parent_id, 0), COALESCE(pn.name, ''), COALESCE(a.created_by_user_id, 0)`
+	COALESCE(a.parent_id, 0), COALESCE(pn.name, ''), COALESCE(a.created_by_user_id, 0), COALESCE(a.icon, '')`
 
 const accountFrom = `FROM account a
 	LEFT JOIN account pn ON pn.id = a.parent_id`
@@ -182,7 +184,7 @@ func (a *App) listAccounts(w http.ResponseWriter, r *http.Request) {
 			&r.StatementDay, &r.HasStmtDay,
 			&r.PaymentDue, &r.HasPayDue,
 			&r.Opening, &r.OpeningDate, &r.Active, &r.Notes,
-			&r.ParentID, &r.ParentName, &r.CreatedBy); err != nil {
+			&r.ParentID, &r.ParentName, &r.CreatedBy, &r.Icon); err != nil {
 			http.Error(w, "scan account: "+err.Error(), 500)
 			return
 		}
@@ -289,13 +291,14 @@ func (a *App) renderAccountForm(w http.ResponseWriter, r *http.Request, f Accoun
 // restore / delete buttons + modal copy) for the account details page.
 func (a *App) renderAccountFormL(w http.ResponseWriter, r *http.Request, f AccountForm, lc *accountLifecycle) {
 	a.render(w, r, http.StatusOK, "reference_account_form.html", map[string]any{
-		"Title":     "Account form",
-		"Section":   "accounts",
-		"F":         f,
-		"Types":     accountTypes,
-		"Editing":   f.ID > 0,
-		"Lifecycle": lc,
-		"Flash":     flashFrom(r),
+		"Title":      "Account form",
+		"Section":    "accounts",
+		"F":          f,
+		"Types":      accountTypes,
+		"Editing":    f.ID > 0,
+		"Lifecycle":  lc,
+		"Flash":      flashFrom(r),
+		"IconGroups": iconGroups(),
 	})
 }
 
@@ -311,6 +314,12 @@ func (a *App) parseAccountForm(r *http.Request) AccountForm {
 	}
 	f.OpeningDate = strings.TrimSpace(r.FormValue("opening_date"))
 	f.Notes = strings.TrimSpace(r.FormValue("notes"))
+	// D32: icon glyph key — validated against the registry; "" = unpicked.
+	f.Icon = strings.TrimSpace(r.FormValue("icon"))
+	if f.Icon != "" && !iconValid(f.Icon) {
+		f.Err = "Unknown icon."
+		return f
+	}
 	if f.Name == "" {
 		f.Err = "Name is required."
 		return f
@@ -421,12 +430,12 @@ func (a *App) handleAccountCreate(w http.ResponseWriter, r *http.Request) {
 	err = a.Pool.QueryRow(r.Context(),
 		`INSERT INTO account (household_id, name, institution, account_type, balance_type,
 		 card_type, credit_limit, statement_day, payment_due_day,
-		 opening_balance, opening_balance_date, is_active, notes, parent_id,
+		 opening_balance, opening_balance_date, is_active, notes, icon, parent_id,
 		 created_by_user_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
 		hh, f.Name, f.Institution, f.Type, f.BalanceType,
 		f.cardOrNil(), f.creditLimitOrNil(), f.stmtDayOrNil(), f.payDueOrNil(),
-		f.Opening, f.openingDateOrNil(), true, f.Notes, f.parentOrNil(), sess.UserID).Scan(&id)
+		f.Opening, f.openingDateOrNil(), true, f.Notes, iconOrNil(f.Icon), f.parentOrNil(), sess.UserID).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "An account with this name already exists."
@@ -462,7 +471,7 @@ func (a *App) handleAccountEdit(w http.ResponseWriter, r *http.Request) {
 			&cur.StatementDay, &cur.HasStmtDay,
 			&cur.PaymentDue, &cur.HasPayDue,
 			&cur.Opening, &cur.OpeningDate, &cur.Active, &cur.Notes,
-			&cur.ParentID, &cur.ParentName, &cur.CreatedBy)
+			&cur.ParentID, &cur.ParentName, &cur.CreatedBy, &cur.Icon)
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.Error(w, "not found", 404)
 		return
@@ -500,11 +509,11 @@ func (a *App) handleAccountEdit(w http.ResponseWriter, r *http.Request) {
 	_, err = a.Pool.Exec(ctx,
 		`UPDATE account SET name=$1, institution=$2, account_type=$3, balance_type=$4,
 		 card_type=$5, credit_limit=$6, statement_day=$7, payment_due_day=$8,
-		 opening_balance=$9, opening_balance_date=$10, notes=$11, parent_id=$12
-		 WHERE id=$13 AND household_id=$14`,
+		 opening_balance=$9, opening_balance_date=$10, notes=$11, icon=$12, parent_id=$13
+		 WHERE id=$14 AND household_id=$15`,
 		f.Name, f.Institution, f.Type, f.BalanceType,
 		f.cardOrNil(), f.creditLimitOrNil(), f.stmtDayOrNil(), f.payDueOrNil(),
-		f.Opening, f.openingDateOrNil(), f.Notes, f.parentOrNil(), id, hh)
+		f.Opening, f.openingDateOrNil(), f.Notes, iconOrNil(f.Icon), f.parentOrNil(), id, hh)
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "An account with this name already exists."
