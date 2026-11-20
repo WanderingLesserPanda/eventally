@@ -2,7 +2,13 @@
 
 Settled in the 2026-11-19 grill-with-docs session (two grill rounds + R2.4
 deep-research round + two Penpot mockups, both approved "okay for MVP").
-Status: **SIGNED OFF 2026-11-20** — implementation authorized.
+Status: **SHIPPED** (decisions signed off 2026-11-20; implemented exactly as
+signed — migration 000019, vendored Line Awesome 2.1.0 (MIT, LICENSE.txt),
+the 296-glyph code-managed registry (11 domain groups), the search/group
+picker modal on both forms, app-side key validation with default
+resolution, rendering on the six surfaces, the account-type emoji
+retired; verified by the Go tests, smoke-d32.sh, and rehearse-d32.sh per
+the section below).
 
 Adds a selectable icon to every category and account. Icons render on the
 six agreed surfaces, the existing account-type emoji is retired as the
@@ -484,6 +490,27 @@ Two research rounds (2026-11-19) on how icon identity is stored in the wild:
 Option B (ezbookkeeping-style banded int codes) noted as a proven
 alternative; Option C (DB table + FK) ruled out — contradicts the settled
 "one registry file, no migration" decision.
+
+## Verification
+
+- `internal/web/d32_test.go` — `TestD32Registry` (296 unique `la-*` keys, 11
+  groups, every key resolvable in the vendored CSS, no CSS duplicates,
+  default resolution for unknown/empty keys + the per-account-type map),
+  `TestD32CategoryIconAnyMember` (plain member set + unknown key rejected),
+  `TestD32AccountIconNeedsEditGrant` (403 without the Edit grant, edit-all
+  grantee succeeds, unknown key rejected),
+  `TestD32AccountDefaultIcons` (per-type defaults render).
+- `smoke-d32.sh` — scratch-DB HTTP pass: LA assets serve (CSS + font +
+  LICENSE), picker markup on both forms (296 cells + "No icon" row),
+  category icon set/edited by a plain member, unknown key rejected with no
+  row, account icon set by the owner, 403 without the Edit grant (and no
+  write), icons (picked + defaults) render on all six surfaces, no emoji
+  glyphs on the accounts grid.
+- `rehearse-d32.sh` — cutover rehearsal on a `eventally_dev` template copy:
+  auto-migration to v19 (000017/18/19), the icon columns additive with every
+  pre-existing row NULL, budget totals bit-identical before/after, full Go
+  suite green. The live `eventally_dev` migration (16 → 19) is still
+  gated on explicit approval + fresh backup, per the standing rule.
 
 ## Sign-off
 
