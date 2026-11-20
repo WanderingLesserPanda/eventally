@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"database/sql"
 	"strconv"
 	"strings"
 	"time"
@@ -972,21 +972,21 @@ func (a *App) reRenderForm(w http.ResponseWriter, r *http.Request, hh, id int64,
 
 // txnLine is one row of the transactions list.
 type txnLine struct {
-	ID        int64
-	Date      time.Time
-	Label     string
-	Category  string
+	ID       int64
+	Date     time.Time
+	Label    string
+	Category string
 	// Icon is the D32 category glyph key ("" = unpicked or no category; the
 	// template renders the category default via the catIcon function).
-	Icon  string
-	NoCat bool // D34: legacy row without a category — the explicit "no category" marker
-	Total     money.Money
-	Charged   string // e.g. "JPY", "" when base currency
-	Original  string // e.g. "400 JPY" when Charged != ""
-	FromTo    string
-	Status    string
-	Synced    bool // D34: currently synced (is_synced) — the "synced ✓" badge
-	SyncedBy  []string // D33 follow-up: A-side chip — members who synced a copy elsewhere
+	Icon     string
+	NoCat    bool // D34: legacy row without a category — the explicit "no category" marker
+	Total    money.Money
+	Charged  string // e.g. "JPY", "" when base currency
+	Original string // e.g. "400 JPY" when Charged != ""
+	FromTo   string
+	Status   string
+	Synced   bool     // D34: currently synced (is_synced) — the "synced ✓" badge
+	SyncedBy []string // D33 follow-up: A-side chip — members who synced a copy elsewhere
 }
 
 type listFilters struct {
@@ -1069,7 +1069,7 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN party oc       ON oc.id = t.origin_party_id
 		LEFT JOIN account da ON da.id = t.destination_account_id
 		LEFT JOIN party dc       ON dc.id = t.destination_party_id
-		WHERE ` + strings.Join(conds, " AND ") + `
+		WHERE `+strings.Join(conds, " AND ")+`
 		ORDER BY t.transaction_date DESC, t.id DESC
 		LIMIT 200`, args...)
 	if err != nil {
@@ -1080,12 +1080,12 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 	var list []txnLine
 	for rows.Next() {
 		var (
-			l     txnLine
-			desc  string
-			merch string
-			orig  float64
+			l      txnLine
+			desc   string
+			merch  string
+			orig   float64
 			ot, dt string
-			_ = ot
+			_      = ot
 		)
 		if err := rows.Scan(&l.ID, &l.Date, &desc, &l.Total, &l.Charged, &orig,
 			&l.Status, &l.Category, &l.Icon, &merch, &ot, &dt, &l.Synced); err != nil {
@@ -1266,33 +1266,33 @@ type splitLine struct {
 }
 
 type txnDetail struct {
-	ID           int64
-	Date         time.Time
-	Class        string
-	Description  string
-	Merchant     string
-	Category     string
+	ID          int64
+	Date        time.Time
+	Class       string
+	Description string
+	Merchant    string
+	Category    string
 	// Icon is the D32 category glyph key ("" = unpicked or no category).
-	Icon     string
-	Notes    string
-	Total        money.Money
-	Charged      string
-	Original     string
-	Rate         string
-	OriginLabel  string
-	DestLabel    string
-	Status       string
-	Source       string
-	Synced       bool // D34: currently synced (is_synced, ADR-0007) — the detail badge
-	Detachable   bool // D34: a synced copy — the "Detach from source" action is offered
-	NoCat        bool // D34: no category (legacy rows) — the explicit "no category" marker
-	Cats         []opt // D34: the record-form picker (the pending-no-category approve form)
-	SyncedBy     []string // D33 follow-up: A-side "synced by" lines (source side only)
-	RecordedBy   string
-	Splits       []splitLine
-	HasAllocs    bool
-	Settlements  []settlementDetailLine
-	ReceiptPath  string
+	Icon        string
+	Notes       string
+	Total       money.Money
+	Charged     string
+	Original    string
+	Rate        string
+	OriginLabel string
+	DestLabel   string
+	Status      string
+	Source      string
+	Synced      bool     // D34: currently synced (is_synced, ADR-0007) — the detail badge
+	Detachable  bool     // D34: a synced copy — the "Detach from source" action is offered
+	NoCat       bool     // D34: no category (legacy rows) — the explicit "no category" marker
+	Cats        []opt    // D34: the record-form picker (the pending-no-category approve form)
+	SyncedBy    []string // D33 follow-up: A-side "synced by" lines (source side only)
+	RecordedBy  string
+	Splits      []splitLine
+	HasAllocs   bool
+	Settlements []settlementDetailLine
+	ReceiptPath string
 }
 
 // settlementDetailLine is one settlement allocated against this
@@ -1320,9 +1320,9 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 
 	var t txnDetail
 	var (
-		catsel, mers int64
-		charged      string
-		orig, rate   float64
+		catsel, mers       int64
+		charged            string
+		orig, rate         float64
 		merch, cat, catIco string
 	)
 	err = a.Pool.QueryRow(ctx, `

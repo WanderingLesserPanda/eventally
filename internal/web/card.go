@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/WanderingLesserPanda/eventally/internal/money"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // pgErrCode returns the Postgres SQLSTATE of err, or "" if it is not a
@@ -52,10 +52,10 @@ var payMethods = []string{"transfer", "online", "mobile", "cash", "other"}
 
 // cardLine is one row of the /cards list.
 type cardLine struct {
-	ID            int64
-	Name          string
-	Institution   string
-	CardType      string
+	ID          int64
+	Name        string
+	Institution string
+	CardType    string
 	// Icon is the D32 glyph key ("" = unpicked; the template renders the
 	// credit-card default via the acctIcon function).
 	Icon          string
@@ -67,10 +67,10 @@ type cardLine struct {
 
 // byPerson is one row of the per-person outstanding summary.
 type byPerson struct {
-	Person      string
-	UserID      int64 // >0 for household users (drives the Pay link)
-	Share       money.Money
-	Due         money.Money
+	Person string
+	UserID int64 // >0 for household users (drives the Pay link)
+	Share  money.Money
+	Due    money.Money
 }
 
 // unpaidLine is one payable transaction_split row.
@@ -156,22 +156,22 @@ type payLegForm struct {
 
 // cardPayForm is the /cards/{id}/pay form (GET and re-render).
 type cardPayForm struct {
-	Err         string
-	CardID      int64
-	CardName    string
-	Amount      string
-	Date        string
-	Notes       string
-	Legs        []payLegForm
-	Rows        []payRow
-	AllocSum    money.Money
+	Err      string
+	CardID   int64
+	CardName string
+	Amount   string
+	Date     string
+	Notes    string
+	Legs     []payLegForm
+	Rows     []payRow
+	AllocSum money.Money
 	// Unapplied is the part of the typed payment not covered by the
 	// allocations (shown on the record button when > 0, Gate 4 option (a)).
-	Unapplied   money.Money
-	Users       []opt
-	Sources     []opt // asset accounts (D6 source)
-	Methods     []string
-	NothingDue  bool
+	Unapplied  money.Money
+	Users      []opt
+	Sources    []opt // asset accounts (D6 source)
+	Methods    []string
+	NothingDue bool
 }
 
 // --- shared queries ---------------------------------------------------------
@@ -189,24 +189,24 @@ type cardFamilyLine struct {
 // cardFamily is the one-level parent/child family of a card (D19): the
 // card itself plus its parent or its children.
 type cardFamily struct {
-	ID          int64
-	Name        string
-	IsParent    bool
-	ParentID    int64
-	ParentName  string
-	Children    []cardFamilyLine
-	TotalOut    money.Money // roll-up when IsParent
-	TotalRec    money.Money // roll-up when IsParent
+	ID         int64
+	Name       string
+	IsParent   bool
+	ParentID   int64
+	ParentName string
+	Children   []cardFamilyLine
+	TotalOut   money.Money // roll-up when IsParent
+	TotalRec   money.Money // roll-up when IsParent
 }
 
 // cardAccountRow loads one credit-card account scoped to the household.
 func (a *App) cardAccountRow(ctx context.Context, hh, id int64) (int64, string, string, string, money.Money, error) {
 	var (
-		acID          int64
-		name          string
-		institution   string
-		cardType      string
-		creditLimit   money.Money
+		acID        int64
+		name        string
+		institution string
+		cardType    string
+		creditLimit money.Money
 	)
 	err := a.Pool.QueryRow(ctx, `
 		SELECT id, name, institution, COALESCE(card_type, ''), COALESCE(credit_limit, 0)
@@ -473,8 +473,8 @@ func (a *App) cardPayments(ctx context.Context, hh int64, fam []int64) ([]payLin
 	}
 	for arows.Next() {
 		var (
-			pid     int64
-			alloc   allocLine
+			pid   int64
+			alloc allocLine
 		)
 		if err := arows.Scan(&pid, &alloc.Amount, &alloc.Date, &alloc.Label,
 			&alloc.Participant); err != nil {
@@ -795,7 +795,7 @@ func (a *App) handleCardDetail(w http.ResponseWriter, r *http.Request) {
 			ID: id, Name: name, Institution: inst, CardType: ctype,
 			CreditLimit: limit, Outstanding: out, Recorded: bal,
 			UnappliedCredit: unapplied,
-			People: people, Unpaid: unpaid, Payments: pays,
+			People:          people, Unpaid: unpaid, Payments: pays,
 			Family: famView,
 		},
 	})
@@ -1425,8 +1425,8 @@ func (a *App) handleSettlementDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := writeHistoryTx(ctx, tx, hh, historyEvent{
 		EntityType: "settlement", EntityID: id, Action: "deleted",
-		Summary:  "deleted",
-		Name:     sname, EventDate: sdate, Amount: samt,
+		Summary: "deleted",
+		Name:    sname, EventDate: sdate, Amount: samt,
 		AccountIDs: accIDs, RelatedIDs: relIDs, ActorID: sess.UserID,
 	}); err != nil {
 		http.Error(w, "internal error", 500)

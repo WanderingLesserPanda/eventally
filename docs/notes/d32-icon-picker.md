@@ -501,11 +501,15 @@ alternative; Option C (DB table + FK) ruled out — contradicts the settled
   grantee succeeds, unknown key rejected),
   `TestD32AccountDefaultIcons` (per-type defaults render).
 - `smoke-d32.sh` — scratch-DB HTTP pass: LA assets serve (CSS + font +
-  LICENSE), picker markup on both forms (296 cells + "No icon" row),
-  category icon set/edited by a plain member, unknown key rejected with no
-  row, account icon set by the owner, 403 without the Edit grant (and no
-  write), icons (picked + defaults) render on all six surfaces, no emoji
-  glyphs on the accounts grid.
+  LICENSE), picker markup on both forms (296 cells + "No icon" row + the
+  registered `iconPicker` Alpine component), category icon set/edited by a
+  plain member, unknown key rejected with no row, account icon set by the
+  owner, 403 without the Edit grant (and no write), icons (picked +
+  defaults) render on all six surfaces, no emoji glyphs on the accounts
+  grid. The picker's client-side behavior (select, save-to-hidden-input,
+  no-icon clear, search by label and group) is verified headlessly with a
+  Node harness driving the real component code against the rendered
+  markup.
 - `rehearse-d32.sh` — cutover rehearsal on a `eventally_dev` template copy:
   auto-migration to v19 (000017/18/19), the icon columns additive with every
   pre-existing row NULL, budget totals bit-identical before/after, full Go

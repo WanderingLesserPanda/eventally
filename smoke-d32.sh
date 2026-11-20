@@ -178,6 +178,7 @@ CATFORM="$(page u /categories/new)"
 CELLS="$(echo "$CATFORM" | grep -o 'class="icon-cell" data-key="la-' | wc -l)"
 [[ "$CELLS" == "296" ]] || fail "category picker cells $CELLS, want 296"
 [[ "$CATFORM" == *'data-label="no icon (use default)"'* ]] || fail "picker missing 'No icon (use default)' row"
+[[ "$CATFORM" == *"Alpine.data('iconPicker'"* ]] || fail "picker component not registered in the page"
 
 echo "==> 3. plain member sets a category icon via the form (no grant gate)"
 code="$(post m /categories --csrf-src=/categories/new \

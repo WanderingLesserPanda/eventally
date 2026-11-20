@@ -16,7 +16,7 @@ import (
 
 // dashCatRow is one top-level category in the spend and budget cards.
 type dashCatRow struct {
-	Name   string
+	Name string
 	// Icon is the D32 glyph key ("" = unpicked; the template renders the
 	// category default via the catIcon function).
 	Icon   string
@@ -247,17 +247,17 @@ func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.render(w, r, http.StatusOK, "dashboard.html", map[string]any{
-		"Title":        "Dashboard",
-		"Flash":        a.joinFlash(r),
-		"Join":         a.pendingJoinPrompt(w, r),
-		"MonthLabel":   now.Format("January 2006"),
-		"Cats":         cats,
-		"SpendTotal":   spendTotal,
-		"BudgetTotal":   budgetTotal,
-		"ActualOnBudget": actualOnBudget,
+		"Title":           "Dashboard",
+		"Flash":           a.joinFlash(r),
+		"Join":            a.pendingJoinPrompt(w, r),
+		"MonthLabel":      now.Format("January 2006"),
+		"Cats":            cats,
+		"SpendTotal":      spendTotal,
+		"BudgetTotal":     budgetTotal,
+		"ActualOnBudget":  actualOnBudget,
 		"BudgetRemaining": budgetTotal.Sub(actualOnBudget),
-		"CardBals":     cardBals,
-		"PersonOuts":   personOuts,
-		"Pending":      pending,
+		"CardBals":        cardBals,
+		"PersonOuts":      personOuts,
+		"Pending":         pending,
 	})
 }

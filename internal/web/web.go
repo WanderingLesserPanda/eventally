@@ -27,18 +27,18 @@ type App struct {
 // New loads templates and returns a ready App.
 func New(pool *pgxpool.Pool, tmplDir, dataDir string) (*App, error) {
 	funcs := template.FuncMap{
-		"money": moneyFmt,
-		"date":  dateFmt,
-		"now":   time.Now,
-		"csrf":  func(r *http.Request) string { return csrfToken(r) },
-		"add":   func(a, b int) int { return a + b },
-		"orDash": orDash,
+		"money":     moneyFmt,
+		"date":      dateFmt,
+		"now":       time.Now,
+		"csrf":      func(r *http.Request) string { return csrfToken(r) },
+		"add":       func(a, b int) int { return a + b },
+		"orDash":    orDash,
 		"hasPrefix": hasPrefix,
-	"contains":  containsStr,
-	"catIcon":     catIcon,
-	"acctIcon":    acctIcon,
-	"humanType":   acctTypeLabel,
-	"utilPct":   utilPct,
+		"contains":  containsStr,
+		"catIcon":   catIcon,
+		"acctIcon":  acctIcon,
+		"humanType": acctTypeLabel,
+		"utilPct":   utilPct,
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseGlob(filepath.Join(tmplDir, "*.html"))
 	if err != nil {

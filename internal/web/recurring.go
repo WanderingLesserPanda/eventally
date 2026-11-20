@@ -30,20 +30,20 @@ import (
 
 // RecurringLine is one row of the template list.
 type RecurringLine struct {
-	ID              int64
-	Name            string
-	Merchant        string
-	Category        string
-	Account         string
-	Amount          money.Money
-	DayOfMonth      int
-	Participants    string // e.g. "tester, Partner" — display only
-	Active          bool
-	LastGenerated   *time.Time
-	AccountID       int64
-	Creator         int64 // 0 = unknown (pre-000012 rows); R5 delete needs a real creator
-	CanDelete       bool
-	CanEdit         bool
+	ID            int64
+	Name          string
+	Merchant      string
+	Category      string
+	Account       string
+	Amount        money.Money
+	DayOfMonth    int
+	Participants  string // e.g. "tester, Partner" — display only
+	Active        bool
+	LastGenerated *time.Time
+	AccountID     int64
+	Creator       int64 // 0 = unknown (pre-000012 rows); R5 delete needs a real creator
+	CanDelete     bool
+	CanEdit       bool
 }
 
 // recurringSpec is the validated create/edit form payload.
@@ -205,12 +205,12 @@ type recurringForm struct {
 	SelectedKeys []string
 	Active       bool
 
-	Merchants   []opt
-	Cats        []opt
-	Accounts    []opt
-	Users       []opt
-	Parties     []opt
-	DayOptions  []int
+	Merchants  []opt
+	Cats       []opt
+	Accounts   []opt
+	Users      []opt
+	Parties    []opt
+	DayOptions []int
 }
 
 func (a *App) recurringFormOptions(ctx context.Context, hh int64) (*recurringForm, error) {
@@ -831,14 +831,14 @@ func (a *App) generateRecurringEntry(ctx context.Context, hh int64, d dueTemplat
 // reviewLine is one row of the pending-review queue (D9) and of the D34
 // bulk modal.
 type reviewLine struct {
-	ID         int64
-	Date       time.Time
-	Label      string
-	Category   string
+	ID       int64
+	Date     time.Time
+	Label    string
+	Category string
 	// Icon is the D32 category glyph key ("" = unpicked or no category).
-	Icon  string
-	CatID int64
-	NoCat bool // D34: no category — the explicit marker (legacy rows)
+	Icon       string
+	CatID      int64
+	NoCat      bool // D34: no category — the explicit marker (legacy rows)
 	Synced     bool // D34: currently synced (is_synced) — the bulk modal lists these
 	Total      money.Money
 	Source     string
@@ -1105,7 +1105,7 @@ func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 		// is committed yet — Cancel approves nothing).
 		a.renderBulkModal(w, r, hh, "review_bulk_modal.html", map[string]any{
 			"Title": "Approve selected records", "Err": "",
-			"Cats": a.syncCategoryOptions(ctx, hh),
+			"Cats":     a.syncCategoryOptions(ctx, hh),
 			"SyncRows": syncRows, "StraightRows": straightRows, "Skipped": noCatRows,
 			"LockedN": lockedN, "DeniedN": denied, "IDs": ids,
 		})
@@ -1127,9 +1127,9 @@ func (a *App) handleReviewBulk(w http.ResponseWriter, r *http.Request) {
 	}
 	if missing > 0 {
 		a.renderBulkModal(w, r, hh, "review_bulk_modal.html", map[string]any{
-			"Title": "Approve selected records",
-			"Err":   fmt.Sprintf("%d synced record(s) still need a category — pick one for each.", missing),
-			"Cats":  a.syncCategoryOptions(ctx, hh),
+			"Title":    "Approve selected records",
+			"Err":      fmt.Sprintf("%d synced record(s) still need a category — pick one for each.", missing),
+			"Cats":     a.syncCategoryOptions(ctx, hh),
 			"SyncRows": syncRows, "StraightRows": straightRows, "Skipped": noCatRows,
 			"LockedN": lockedN, "DeniedN": denied, "IDs": ids,
 		})
