@@ -337,3 +337,33 @@ a.hh-item { cursor: pointer; }
 .log-op td {
   padding-top: 1rem; font-weight: 600; color: var(--muted); font-size: 0.85rem;
 }
+
+/* D32: category/account icons (Line Awesome 2.1.0, ADR-0009). */
+/* The preview chip beside the "Choose icon" button on the category and
+   account forms: the picked glyph, or the default hint when unpicked. */
+.icon-chip {
+  width: 30px; height: 30px; border-radius: 8px; background: #eef1f6;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1rem; flex: none; vertical-align: middle;
+}
+/* The picker modal is wider than a confirmation modal and scrolls. */
+.icon-modal { max-width: 34rem; display: flex; flex-direction: column; gap: 0.8rem; }
+.icon-modal .icon-search { width: 100%; margin: 0; }
+.icon-grid {
+  max-height: 50vh; overflow-y: auto; padding-right: 0.3rem;
+}
+.icon-group-name {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--muted); margin: 0.8rem 0 0.3rem;
+}
+.icon-group:first-child .icon-group-name { margin-top: 0; }
+.icon-cells { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.icon-cell {
+  width: 42px; height: 42px; border-radius: 8px; border: 1px solid transparent;
+  background: none; color: var(--ink); font-size: 1.15rem; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0;
+}
+.icon-cell:hover { background: #eef1f6; }
+.icon-cell.selected { border-color: var(--accent); background: #e8f0fe; color: var(--accent); }
+/* The explicit "No icon (use default)" row — text, not a glyph. */
+.icon-cell-none { width: auto; padding: 0 0.7rem; font-size: 0.82rem; font-weight: 500; }
