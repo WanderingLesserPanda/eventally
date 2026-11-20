@@ -40,7 +40,7 @@
           <div class="icon-group" data-group="Default">
             <div class="icon-group-name">Default</div>
             <div class="icon-cells">
-              <button type="button" class="icon-cell icon-cell-none" data-key="" data-label="no icon (use default)" @click="pSel('')" :class="{ selected: pKey === '' }">No icon (use default)</button>
+              <button type="button" class="icon-cell icon-cell-none" data-key="" data-label="no icon (use default)" @click="pSel('')" :class="{ selected: pKey === '' }"><i class="la la-tag"></i>(use default)</button>
             </div>
           </div>
           {{range $g := .IconGroups}}

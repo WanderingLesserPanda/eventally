@@ -370,5 +370,7 @@ a.hh-item { cursor: pointer; }
 }
 .icon-cell:hover { background: #eef1f6; }
 .icon-cell.selected { border-color: var(--accent); background: #e8f0fe; color: var(--accent); }
-/* The explicit "No icon (use default)" row — text, not a glyph. */
+/* The "No icon (use default)" row: category forms show the default la-tag
+   glyph + "(use default)" text; account forms keep the text-only label. */
 .icon-cell-none { width: auto; padding: 0 0.7rem; font-size: 0.82rem; font-weight: 500; }
+.icon-cell-none .la { margin-right: 0.35rem; }

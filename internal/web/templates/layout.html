@@ -22,7 +22,12 @@ document.addEventListener('alpine:init', () => {
     pSel(key, style) { this.pKey = key; this.pStyle = style || 'la'; },
     pFilter() {
       const q = this.pQ.trim().toLowerCase();
-      const modal = this.$el.querySelector('.icon-modal');
+      // $el is the element of the directive that called us (usually the
+      // search input, which lives INSIDE the modal) — so climb up to the
+      // modal instead of descending from the x-data root. Fall back to a
+      // root-relative search if ever called from the root scope.
+      const modal = this.$el.closest('.icon-modal') || this.$el.querySelector('.icon-modal');
+      if (!modal) return;
       modal.querySelectorAll('.icon-group').forEach((g) => {
         let any = false;
         g.querySelectorAll('.icon-cell').forEach((c) => {

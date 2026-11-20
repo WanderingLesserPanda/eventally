@@ -206,6 +206,7 @@ CATFORM="$(page u /categories/new)"
 CELLS="$(echo "$CATFORM" | grep -o 'class="icon-cell" data-key="la-' | wc -l)"
 [[ "$CELLS" == "296" ]] || fail "category picker cells $CELLS, want 296"
 [[ "$CATFORM" == *'data-label="no icon (use default)"'* ]] || fail "picker missing 'No icon (use default)' row"
+[[ "$CATFORM" == *'<i class="la la-tag"></i>(use default)'* ]] || fail "category 'No icon' row missing default la-tag glyph"
 [[ "$CATFORM" == *"Alpine.data('iconPicker'"* ]] || fail "picker component not registered in the page"
 
 echo "==> 3. plain member sets a category icon via the form (no grant gate)"
@@ -240,6 +241,7 @@ echo "==> 6. account form: picker markup"
 ACCFORM="$(page u /accounts/new)"
 [[ "$ACCFORM" == *'class="icon-grid"'* ]] || fail "account form: picker grid missing"
 [[ "$ACCFORM" == *'data-label="no icon (use default)"'* ]] || fail "account picker missing 'No icon' row"
+[[ "$ACCFORM" != *'<i class="la la-tag"></i>(use default)'* ]] || fail "account 'No icon' row must stay text-only (default is per type)"
 
 echo "==> 7. owner sets an account icon via the form"
 code="$(post u /accounts --csrf-src=/accounts/new \

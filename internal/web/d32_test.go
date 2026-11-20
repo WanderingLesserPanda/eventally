@@ -227,6 +227,9 @@ func TestD32CategoryIconAnyMember(t *testing.T) {
 	if !strings.Contains(body, `data-label="no icon (use default)"`) {
 		t.Fatal("picker missing the 'No icon (use default)' row")
 	}
+	if !strings.Contains(body, `<i class="la la-tag"></i>(use default)`) {
+		t.Fatal("category picker's 'No icon' row missing the default la-tag glyph")
+	}
 	if !strings.Contains(body, `iconPicker('la-leaf', 'la')`) {
 		t.Fatal("picker not preselected with the stored key")
 	}
@@ -365,5 +368,53 @@ func TestD32BrandStyle(t *testing.T) {
 	}
 	if !strings.Contains(string(css), `.lab{font-family:'Line Awesome Brands'}`) {
 		t.Fatal("vendor CSS no longer assigns the Brands family to .lab")
+	}
+}
+
+// TestD32SearchFilterShape pins the picker-search fix. In Alpine v3, a method
+// called from a child element's directive binds this.$el to that child —
+// here the search input, which sits INSIDE the modal — so descending from
+// this.$el for the sibling .icon-modal returned null and pFilter threw on
+// every keystroke (search silently dead). pFilter must climb UP from the
+// calling element via closest, with a root-relative fallback and a null
+// guard. End-to-end behaviour (type → grid filters → select → commit) is
+// verified with a jsdom harness against the real vendored alpine.min.js.
+func TestD32SearchFilterShape(t *testing.T) {
+	layout, err := os.ReadFile(filepath.Join("templates", "layout.html"))
+	if err != nil {
+		t.Fatalf("read layout: %v", err)
+	}
+	l := string(layout)
+	if !strings.Contains(l, `this.$el.closest('.icon-modal')`) {
+		t.Fatal("pFilter must resolve the modal via closest('.icon-modal') from the calling element")
+	}
+	if !strings.Contains(l, `if (!modal) return;`) {
+		t.Fatal("pFilter must guard against a missing modal")
+	}
+	if strings.Contains(l, `const modal = this.$el.querySelector('.icon-modal');`) {
+		t.Fatal("pFilter must not descend from this.$el for the modal (Alpine binds $el to the calling element)")
+	}
+
+	catForm, err := os.ReadFile(filepath.Join("templates", "reference_category_form.html"))
+	if err != nil {
+		t.Fatalf("read category form: %v", err)
+	}
+	// Category "No icon" row: default la-tag glyph + "(use default)" text;
+	// the data-label stays machine-stable so search still matches it.
+	if !strings.Contains(string(catForm), `<i class="la la-tag"></i>(use default)`) {
+		t.Fatal("category 'No icon' row must show the default la-tag glyph + '(use default)'")
+	}
+	if !strings.Contains(string(catForm), `data-label="no icon (use default)"`) {
+		t.Fatal("category 'No icon' row lost its data-label")
+	}
+
+	acctForm, err := os.ReadFile(filepath.Join("templates", "reference_account_form.html"))
+	if err != nil {
+		t.Fatalf("read account form: %v", err)
+	}
+	// Account row stays text-only: its default is per account type, so one
+	// glyph on the row would mislead.
+	if !strings.Contains(string(acctForm), `>No icon (use default)</button>`) {
+		t.Fatal("account 'No icon' row must stay text-only (default is per account type)")
 	}
 }

@@ -91,6 +91,19 @@ code-managed registry.
   brands), `la` (Free solid) for the rest. The brand set was derived by
   reading the vendored woff2 cmaps and is pinned by TestD32BrandStyle;
   rendering a brand key with `la` loads a font that lacks the codepoint.
+- 2026-11-20 fix (picker search dead in the browser): pFilter located the
+  modal with `this.$el.querySelector`, but Alpine v3 binds `this.$el` in a
+  method to the element whose directive called it (the search input, which
+  sits INSIDE the modal), so the descent found nothing and the filter
+  threw on every keystroke. Fixed: climb UP from the calling element via
+  `closest('.icon-modal')` with a root-relative fallback and a null guard;
+  pinned in TestD32SearchFilterShape and verified end-to-end (type → filter
+  → select → commit) with a jsdom harness against the real vendored
+  alpine.min.js. Same day, per user request: the category form's "No icon"
+  row now shows the default `la-tag` glyph followed by "(use default)"
+  (data-label unchanged so search still matches it); the account row stays
+  text-only because its default is per account type; picker cells enlarged
+  to 56px / 1.75rem (8 per row) and the chip to 36px.
 
 ## §E Picker UX (R2.5 mockup, approved for MVP)
 
