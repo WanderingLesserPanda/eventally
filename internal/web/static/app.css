@@ -1,12 +1,15 @@
 :root {
   --ink: #1c2430;
   --muted: #6b7686;
-  --line: #e3e7ee;
-  --bg: #f6f7fa;
+  --line: #e7dccc;
+  --bg: #f7f1e9;
   --card: #ffffff;
-  --accent: #2f6df6;
+  --accent: #BD4B12;
   --danger: #d64545;
   --ok: #2e8b57;
+  /* D35: warm selected-row tint (cream) + table-header band (peach). */
+  --sel: #FFF4EB;
+  --band: #FBE9DA;
 }
 * { box-sizing: border-box; }
 body {
@@ -64,7 +67,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); bo
 .muted { color: var(--muted); }
 .small { font-size: 0.85rem; }
 .error { color: var(--danger); background: #fdeeec; border-radius: 8px; padding: 0.5rem 0.8rem; margin-bottom: 0.8rem; }
-.flash { background: #eef4ff; border: 1px solid #cfe0ff; border-radius: 8px; padding: 0.5rem 0.8rem; margin-bottom: 1rem; }
+.flash { background: var(--sel); border: 1px solid var(--band); border-radius: 8px; padding: 0.5rem 0.8rem; margin-bottom: 1rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; }
 .stat .stat-label { color: var(--muted); font-size: 0.85rem; }
 .stat .stat-value { font-size: 1.7rem; font-weight: 700; margin-top: 0.2rem; }
@@ -73,17 +76,17 @@ th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(
 th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
 .money { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 th.money { text-align: right; }
-.tag { display: inline-block; font-size: 0.75rem; border-radius: 99px; padding: 0.1rem 0.55rem; background: #eef1f6; color: var(--muted); }
+.tag { display: inline-block; font-size: 0.75rem; border-radius: 99px; padding: 0.1rem 0.55rem; background: #f0ece4; color: var(--muted); }
 .tag.pending { background: #fff4e0; color: #9a6b00; }
 .tag.approved { background: #e5f5ec; color: var(--ok); }
 .tag.void { background: #f2f2f2; color: #999; text-decoration: line-through; }
 /* D33: synced-record state (a synced copy counts in the budgets). */
 .tag.synced { background: #fbeee2; color: #9a4b00; }
-.tag.a-synced { background: #f2f4f8; color: var(--muted); }
+.tag.a-synced { background: #f0ece4; color: var(--muted); }
 .tag.changed { background: transparent; color: #b45309; border: 1px solid #e9a15e; }
 /* D34: in-motion auto-sync target (the copy hasn't materialized yet) + the
    explicit "no category" marker on legacy rows. */
-.tag.syncing { background: #e8f1fb; color: #1d5fbf; border: 1px solid #bcd4f2; }
+.tag.syncing { background: var(--sel); color: #9a4b00; border: 1px solid var(--band); }
 .tag.no-cat { background: #fdecec; color: #b03030; }
 .empty { padding: 1.4rem 0.4rem; }
 .empty h2 { margin-top: 0; }
@@ -119,7 +122,7 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
 .capture .chip { display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 400;
   border: 1px solid var(--line); border-radius: 99px; padding: 0.4rem 0.85rem;
   margin: 0 0.4rem 0.4rem 0; cursor: pointer; background: #fff; }
-.capture .chip:has(input:checked) { border-color: var(--accent); background: #eef4ff; color: var(--accent); }
+.capture .chip:has(input:checked) { border-color: var(--accent); background: var(--sel); color: var(--accent); }
 .capture .chip input { width: auto; margin: 0; }
 .capture .btn-primary { width: 100%; padding: 0.8rem; font-size: 1.05rem; }
 
@@ -135,7 +138,7 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
    elements size. Putting it on an inner div instead could shrink to a
    box if that element's width/height were ever constrained. */
 body.setup-page {
-  background: linear-gradient(160deg, #f5a04c 0%, #ef8a2b 55%, #e97c1a 100%);
+  background: linear-gradient(160deg, #C96A2E 0%, #BD4B12 55%, #9E3D0B 100%);
 }
 .setup-error {
   max-width: 860px; width: 100%; margin: 0 auto 0.8rem;
@@ -185,9 +188,9 @@ body.setup-page {
   border-top: 1px solid var(--line); padding-top: 1rem; margin-top: 0.4rem;
 }
 .setup-foot .btn-primary {
-  background: #ef8a2b; padding: 0.6rem 1.4rem; display: inline-flex; align-items: center; gap: 0.5rem;
+  background: #BD4B12; padding: 0.6rem 1.4rem; display: inline-flex; align-items: center; gap: 0.5rem;
 }
-.setup-foot .btn-primary:hover { background: #e97c1a; }
+.setup-foot .btn-primary:hover { background: #9E3D0B; }
 .setup-foot .arr { font-weight: 700; }
 .setup-tag { color: rgba(255,255,255,0.9); font-size: 0.8rem; margin: 1.1rem 0 0; }
 @media (max-width: 700px) {
@@ -236,11 +239,11 @@ body.setup-page {
   padding: 0.95rem 1.05rem; display: flex; flex-direction: column; gap: 0.75rem;
   color: var(--ink); transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
 }
-.acct-card:hover { box-shadow: 0 6px 18px rgba(28,36,48,0.10); transform: translateY(-2px); border-color: #d4dae6; color: var(--ink); }
+.acct-card:hover { box-shadow: 0 6px 18px rgba(28,36,48,0.10); transform: translateY(-2px); border-color: #d8cdbb; color: var(--ink); }
  .acct-card.liab { background: linear-gradient(180deg, #fff 0%, #fdf6f0 100%); }
 .acct-top { display: flex; align-items: flex-start; gap: 0.7rem; }
 .acct-ic {
-  width: 38px; height: 38px; border-radius: 10px; background: #eef1f6;
+  width: 38px; height: 38px; border-radius: 10px; background: #f0e6d6;
   display: flex; align-items: center; justify-content: center; font-size: 1.15rem; flex: none;
 }
 .acct-card.liab .acct-ic { background: #fbeee2; }
@@ -342,7 +345,7 @@ a.hh-item { cursor: pointer; }
 /* The preview chip beside the "Choose icon" button on the category and
    account forms: the picked glyph, or the default hint when unpicked. */
 .icon-chip {
-  width: 36px; height: 36px; border-radius: 8px; background: #eef1f6;
+  width: 36px; height: 36px; border-radius: 8px; background: #f0e6d6;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 1.25rem; flex: none; vertical-align: middle;
 }
@@ -368,8 +371,8 @@ a.hh-item { cursor: pointer; }
   background: none; color: var(--ink); font-size: 1.75rem; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; padding: 0;
 }
-.icon-cell:hover { background: #eef1f6; }
-.icon-cell.selected { border-color: var(--accent); background: #e8f0fe; color: var(--accent); }
+.icon-cell:hover { background: #f0e6d6; }
+.icon-cell.selected { border-color: var(--accent); background: var(--sel); color: var(--accent); }
 /* The "No icon (use default)" row: category forms show the default la-tag
    glyph + "(use default)" text; account forms keep the text-only label.
    The glyph renders at the picker's full cell size (1.75rem, matching
