@@ -116,8 +116,27 @@ _Avoid_: audit log (the D30-era name for this same idea), activity feed
 A household's monthly allocation for a category (on the category; a parent
 collects its subtree). Display-only: the dashboard shows current-month
 actual-vs-budget per top-level category. A budget is household property — it
-lives on categories, and categories belong to a household.
+lives on categories, and categories belong to a household. Since D35, a
+subcategory's budget has a [mode](#budget-mode) (standalone, or part of the
+parent's budget), and a category's effective total is
+[computed, not stored](#envelope).
 _Avoid_: spending limit, cap, personal budget
+
+**Budget mode**:
+Whether a subcategory's monthly budget **adds on** to its parent's number
+(standalone — the default) or is carved **out of** the parent's budget
+(part of the parent's budget). A per-subcategory choice set by a checkbox in
+the category form (D35).
+_Avoid_: budget type, allocation type
+
+**Envelope**:
+A parent category's own monthly budget — the household's allocation for that
+category tree. A part-of-parent sub budget is a slice carved out of the
+envelope; slices that exceed it, and slices under a parent with no budget,
+**automatically add on** so the total grows to fit them (with a warning note,
+never blocking). The total is computed from the pieces; it is never written
+back into the parent's stored budget (D35).
+_Avoid_: budget cap, hard limit (over-allocation is shown, not prevented)
 
 **Personal budget**:
 A budget tied to a user rather than a household: the user's own monthly limit
@@ -183,7 +202,7 @@ clears), resetting amount and date to the source's values and keeping the
 local classification and status. It never creates a second copy.
 _Avoid_: re-sync (the general refresh of a linked copy), resync
 
-### Account lifecycle
+### Object lifecycle
 
 **Archived account**:
 A soft-inactivated account (`is_active = false`): history stays intact and
@@ -193,6 +212,20 @@ time. Restoring does not resume paused templates or un-archive cascaded
 children.
 _Avoid_: closed, deleted (deleting is the strict zero-history hard delete — a
 different action)
+
+**Archived category**:
+A soft-inactivated category (`is_active = false`): it stays in history —
+transactions keep their category and the budget history is intact — and it is
+demoted on active surfaces (listed but muted on the Categories page). Restorable
+at any time by unarchiving. Archiving a parent does not archive its
+subcategories.
+_Avoid_: deactivated, disabled (pre-D35 button wording; the app says
+Archive / Unarchive)
+
+**Unarchive**:
+Restoring an archived object (account, category, merchant, party) to active
+(`is_active = true`). The inverse of archive, no confirmation needed.
+_Avoid_: reactivate, enable
 
 **Deletion log**:
 The persistent audit trail of bulk transaction *deletes*: one row per
