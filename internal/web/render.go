@@ -127,6 +127,19 @@ func (a *App) render(w http.ResponseWriter, r *http.Request, status int, name st
 	}
 }
 
+// renderFragment executes a named template (a define, not a full page) and
+// writes the raw HTML fragment — the in-page swap endpoints (ADR-0011) return
+// these so the browser can replace one section without a full reload. The
+// fragment is unwrapped (no layout, no topbar, no footer).
+func (a *App) renderFragment(w http.ResponseWriter, r *http.Request, status int, name string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	w.WriteHeader(status)
+	if err := a.Tmpl.ExecuteTemplate(w, name, data); err != nil {
+		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+	}
+}
+
 // moneyFmt renders a money value for templates. The household's base
 // currency symbol is passed via template data later; RM is the MVP
 // default (D13 makes it a setting).

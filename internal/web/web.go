@@ -36,6 +36,7 @@ func New(pool *pgxpool.Pool, tmplDir, dataDir string) (*App, error) {
 		"hasPrefix": hasPrefix,
 		"contains":  containsStr,
 		"catIcon":   catIcon,
+		"classLabel": classLabel,
 		"iconStyle": iconStyle,
 		"acctIcon":  acctIcon,
 		"humanType": acctTypeLabel,
@@ -106,8 +107,14 @@ func (a *App) Router() http.Handler {
 		authed.Post("/accounts/{id}/restore", a.handleAccountRestore)
 
 		authed.Get("/categories", a.listCategories)
+		// D35: in-page fragment swaps (ADR-0011) — static paths before the
+		// /categories/{id} param route.
+		authed.Get("/categories/pane", a.catPaneFragment)
+		authed.Get("/categories/detail", a.catDetailFragment)
 		authed.Get("/categories/new", a.handleCategoryCreate)
 		authed.Post("/categories", a.handleCategoryCreate)
+		authed.Post("/categories/{id}/archive", a.handleCategoryArchive)
+		authed.Post("/categories/{id}/unarchive", a.handleCategoryUnarchive)
 		authed.Get("/categories/{id}", a.handleCategoryEdit)
 		authed.Post("/categories/{id}", a.handleCategoryEdit)
 		authed.Post("/categories/{id}/deactivate", a.handleCategoryDelete)

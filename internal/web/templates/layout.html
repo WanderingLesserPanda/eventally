@@ -44,6 +44,82 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 });
+// D35: two-pane Categories page (ADR-0011). The page loads once; class-tab
+// switch, row switch, and archive / unarchive are in-page fetch swaps (a GET
+// fragment replaces a pane; a POST returns JSON and the changed panes are
+// re-fetched). No full page reload, no new libraries.
+document.addEventListener('alpine:init', () => {
+  Alpine.data('catsPage', () => ({
+    cls: 'expense',
+    csrf: '',
+    selected: null,
+    $init() {
+      this.cls = this.$el.dataset.class || 'expense';
+      this.csrf = this.$el.dataset.csrf || '';
+      const sel = this.$el.querySelector('#cat-pane .cat-row.selected');
+      if (sel) this.selected = sel.dataset.id;
+    },
+    pane() { return this.$el.querySelector('#cat-pane'); },
+    detail() { return this.$el.querySelector('#cat-detail'); },
+    async fetchText(url) {
+      const r = await fetch(url, { headers: { 'X-Requested-With': 'fetch' } });
+      if (!r.ok) { alert('Request failed (HTTP ' + r.status + ')'); throw new Error('HTTP ' + r.status); }
+      return r.text();
+    },
+    // Class-tab switch: swap the left pane, then load the new class's first row.
+    async switchClass(c) {
+      this.cls = c;
+      this.$el.dataset.class = c;
+      this.$el.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.class === c));
+      this.pane().innerHTML = await this.fetchText('/categories/pane?class=' + encodeURIComponent(c));
+      const first = this.pane().querySelector('.cat-row');
+      if (first) return this.loadDetail(first.dataset.id);
+      this.detail().innerHTML = '<p class="cat-empty">Please add a category first.</p>';
+    },
+    // Row switch: mark the row selected and swap the detail pane in place.
+    async loadDetail(id) {
+      this.selected = String(id);
+      this.$el.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
+      this.detail().innerHTML = await this.fetchText('/categories/detail?id=' + encodeURIComponent(id));
+    },
+    select(id) { return this.loadDetail(id); },
+    // A mutation POST (archive / unarchive). CSRF rides in the body; on success
+    // the caller re-fetches the changed pane(s).
+    post(url) {
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': this.csrf },
+        body: 'csrf=' + encodeURIComponent(this.csrf),
+      }).then(r => {
+        if (!r.ok) { alert('Action failed (HTTP ' + r.status + ')'); throw new Error('HTTP ' + r.status); }
+        return r;
+      });
+    },
+    // Top-level archive / unarchive (the category's own sub-table row): both
+    // panes change (the row demotes + the detail shows Unarchive), so reswap.
+    archiveTop(evt, id) {
+      const name = evt.target.dataset.name || '';
+      if (!confirm('Archive ' + name + '? It stays in history. You can unarchive it later.')) return;
+      return this.post('/categories/' + id + '/archive').then(() => this.reswap());
+    },
+    unarchiveTop(id) { return this.post('/categories/' + id + '/unarchive').then(() => this.reswap()); },
+    // Sub archive / unarchive: only the detail pane's sub-table changes.
+    archiveSub(evt, id) {
+      const name = evt.target.dataset.name || '';
+      if (!confirm('Archive ' + name + '? It stays in history. You can unarchive it later.')) return;
+      return this.post('/categories/' + id + '/archive').then(() => this.loadDetail(this.selected));
+    },
+    unarchiveSub(id) { return this.post('/categories/' + id + '/unarchive').then(() => this.loadDetail(this.selected)); },
+    // Re-fetch the left pane for the active class and the detail for the
+    // currently selected category, re-applying the selection.
+    async reswap() {
+      this.pane().innerHTML = await this.fetchText('/categories/pane?class=' + encodeURIComponent(this.cls));
+      this.$el.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
+      if (this.selected) return this.loadDetail(this.selected);
+      this.detail().innerHTML = '<p class="cat-empty">Please add a category first.</p>';
+    },
+  }));
+});
 </script>
 </head>
 <body{{if eq .Path "/setup"}} class="setup-page"{{end}}>

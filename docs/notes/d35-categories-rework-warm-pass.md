@@ -45,8 +45,12 @@ inspired by it, not a fork.
   right; a full-width divider; then a two-pane body split by one vertical
   divider.
 - **Left pane**: one row per top-level category of the active class —
-  `[D32 icon, default la-tag] [name] [direct-subcategory count, muted]`.
-  Selected row = cream tint + left accent bar + accent text.
+  `[drag grip] [name] [direct-subcategory count, muted]`. No per-category icon
+  in the left pane (kept minimal to avoid bloating the UI; the category icon
+  still renders in the detail-pane header and the sub-table). The drag grip is
+  the reorder affordance (Q13/§C). Selected row = cream tint + left accent bar
+  + accent text. (2026-11-22, user instruction: the icon is dropped from the
+  left pane; supersedes the earlier `[D32 icon, default la-tag]` row shorthand.)
 - **Right pane (detail)**: `[name] [icon]` header with an `Edit Category`
   link; a `Total Budget:` line (envelope rule, §D, `—` when nothing is
   budgeted); a three-column sub-table (accent-tinted header: Subcategory

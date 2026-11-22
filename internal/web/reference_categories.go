@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/WanderingLesserPanda/eventally/internal/money"
@@ -29,45 +30,185 @@ type Category struct {
 	Icon string
 }
 
-// categorySelect lists columns with c.* qualified for the list query
-// (which joins the parent). The edit handler uses its own unqualified
-// SELECT against the single row.
-const categorySelectList = `c.id, c.name, COALESCE(c.parent_id, 0), COALESCE(p.name, ''), c.transaction_class,
-	COALESCE(c.budget_per_month, 0), c.budget_per_month IS NOT NULL, c.is_budgetable, c.is_active,
-	COALESCE(c.icon, '')`
-
+// categorySelectOne lists the unqualified columns for a single-row category
+// SELECT (the edit handler and the detail pane load by id, no parent join).
 const categorySelectOne = `id, name, COALESCE(parent_id, 0), '', transaction_class,
 	COALESCE(budget_per_month, 0), budget_per_month IS NOT NULL, is_budgetable, is_active,
 	COALESCE(icon, '')`
 
 var categoryClasses = []string{"expense", "income", "transfer"}
 
+// catRow is one left-pane row: a top-level category of the active class.
+type catRow struct {
+	ID     int64
+	Name   string
+	Count  int // direct-subcategory count (Q2: direct, not subtree)
+	Active bool
+}
+
+// catDetail is the right detail pane: the selected category, its direct
+// subcategories (self row first), and the display-time total.
+type catDetail struct {
+	Cat      Category
+	Subs     []Category
+	Total    money.Money
+	HasTotal bool
+}
+
 func (a *App) listCategories(w http.ResponseWriter, r *http.Request) {
-	hh := sessionFromContext(r.Context()).Household
-	rows, err := a.Pool.Query(r.Context(),
-		fmt.Sprintf(`SELECT %s FROM category c LEFT JOIN category p ON p.id = c.parent_id
-			WHERE c.household_id = $1 ORDER BY c.transaction_class, c.name`, categorySelectList), hh)
+	ctx := r.Context()
+	hh := sessionFromContext(ctx).Household
+	class := r.URL.Query().Get("class")
+	if !containsStr(categoryClasses, class) {
+		class = "expense" // D35 Q9(ii): the default tab is Expenses.
+	}
+	rows, err := a.catPaneRows(ctx, hh, class)
 	if err != nil {
 		http.Error(w, "list categories: "+err.Error(), 500)
 		return
 	}
-	defer rows.Close()
-	var list []Category
-	for rows.Next() {
-		var c Category
-		if err := rows.Scan(&c.ID, &c.Name, &c.ParentID, &c.ParentName, &c.Class,
-			&c.Budget, &c.HasBudget, &c.Budgetable, &c.Active, &c.Icon); err != nil {
-			http.Error(w, "scan category: "+err.Error(), 500)
-			return
+	// Default selection: an explicit ?sel= wins; otherwise the first listed row
+	// (active rows list before archived, so the first row is the first active).
+	var selID int64
+	if v := r.URL.Query().Get("sel"); v != "" {
+		if n, aerr := strconv.Atoi(v); aerr == nil {
+			selID = int64(n)
 		}
-		list = append(list, c)
+	}
+	if selID == 0 && len(rows) > 0 {
+		selID = rows[0].ID
+	}
+	var detail catDetail
+	if selID != 0 {
+		var derr error
+		detail, derr = a.catDetailData(ctx, hh, selID)
+		if derr != nil {
+			if errors.Is(derr, pgx.ErrNoRows) {
+				selID = 0 // stale ?sel= — fall back to the empty detail
+			} else {
+				http.Error(w, "load category: "+derr.Error(), 500)
+				return
+			}
+		}
 	}
 	a.render(w, r, 200, "reference_categories.html", map[string]any{
-		"Title":   "Categories",
-		"Flash":   flashFrom(r),
-		"Section": "categories",
-		"List":    list,
+		"Title":      "Categories",
+		"Flash":      flashFrom(r),
+		"Section":    "categories",
+		"Class":      class,
+		"SelectedID": selID,
+		"Rows":       rows,
+		"Detail":     detail,
+		"Classes":    categoryClasses,
 	})
+}
+
+// catPaneRows lists the top-level categories of a class, active rows first
+// then archived (each group by sort_order, name), with the direct-subcategory
+// count (Q2: direct, not subtree).
+func (a *App) catPaneRows(ctx context.Context, hh int64, class string) ([]catRow, error) {
+	rows, err := a.Pool.Query(ctx, `
+		SELECT c.id, c.name, c.is_active,
+		       (SELECT count(*) FROM category s WHERE s.parent_id = c.id)
+		FROM category c
+		WHERE c.household_id = $1 AND c.transaction_class = $2 AND c.parent_id IS NULL
+		ORDER BY c.is_active DESC, c.sort_order, c.name`, hh, class)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []catRow
+	for rows.Next() {
+		var r catRow
+		if err := rows.Scan(&r.ID, &r.Name, &r.Active, &r.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// catDetailData loads a category and its direct subcategories (active first,
+// then archived, each by sort_order, name), with the display-time total.
+func (a *App) catDetailData(ctx context.Context, hh, id int64) (catDetail, error) {
+	var d catDetail
+	err := a.Pool.QueryRow(ctx,
+		fmt.Sprintf(`SELECT %s FROM category WHERE id = $2 AND household_id = $1`, categorySelectOne), hh, id).
+		Scan(&d.Cat.ID, &d.Cat.Name, &d.Cat.ParentID, &d.Cat.ParentName, &d.Cat.Class,
+			&d.Cat.Budget, &d.Cat.HasBudget, &d.Cat.Budgetable, &d.Cat.Active, &d.Cat.Icon)
+	if err != nil {
+		return d, err
+	}
+	rows, err := a.Pool.Query(ctx, `
+		SELECT id, name, COALESCE(parent_id,0), '', transaction_class,
+		       COALESCE(budget_per_month,0), budget_per_month IS NOT NULL, is_budgetable, is_active, COALESCE(icon,'')
+		FROM category WHERE household_id = $1 AND parent_id = $2
+		ORDER BY is_active DESC, sort_order, name`, hh, id)
+	if err != nil {
+		return d, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var s Category
+		if err := rows.Scan(&s.ID, &s.Name, &s.ParentID, &s.ParentName, &s.Class,
+			&s.Budget, &s.HasBudget, &s.Budgetable, &s.Active, &s.Icon); err != nil {
+			return d, err
+		}
+		d.Subs = append(d.Subs, s)
+	}
+	d.Total, d.HasTotal = catEnvelopeTotal(d.Cat, d.Subs)
+	return d, nil
+}
+
+// catEnvelopeTotal computes the detail-pane "Total Budget" line.
+//
+// Batch 2 (pre-000020): there is no budget_mode column yet, so every
+// subcategory is standalone and its budget adds on; the total is the parent's
+// own budget plus the sum of its sub budgets. Batch 4 extends this to the full
+// two-mode envelope rule (ADR-0012) once category.budget_mode exists:
+//
+//	total = (Σ standalone sub budgets) + max(parent's own budget, Σ part-of-parent slices)
+//
+// The detail template is unchanged between batches; only this computation grows.
+func catEnvelopeTotal(cat Category, subs []Category) (total money.Money, hasTotal bool) {
+	if cat.HasBudget {
+		total = cat.Budget
+		hasTotal = true
+	}
+	for _, s := range subs {
+		if s.HasBudget {
+			total = total.Add(s.Budget)
+			hasTotal = true
+		}
+	}
+	return total, hasTotal
+}
+
+// classLabel is the human class name for tabs and empty states.
+func classLabel(c string) string {
+	switch c {
+	case "expense":
+		return "Expenses"
+	case "income":
+		return "Income"
+	case "transfer":
+		return "Transfers"
+	default:
+		return c
+	}
+}
+
+// queryInt reads a positive integer from the query string.
+func queryInt(r *http.Request, name string) (int64, bool) {
+	s := r.URL.Query().Get(name)
+	if s == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 type CategoryForm struct {
@@ -166,6 +307,15 @@ func (a *App) handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		hh := sessionFromContext(r.Context()).Household
 		f := CategoryForm{Category: Category{Class: "expense", Budgetable: true}}
+		// D35: ?class= / ?parent= preselect (+ Add Subcategory passes the parent).
+		if c := r.URL.Query().Get("class"); containsStr(categoryClasses, c) {
+			f.Class = c
+		}
+		if pid, ok := queryInt(r, "parent"); ok {
+			if a.verifyParent(r.Context(), hh, pid) == "" {
+				f.ParentID = pid
+			}
+		}
 		f.ParentOptions = a.categoryParentOptions(r.Context(), hh, 0)
 		a.renderCategoryForm(w, r, f)
 		return
@@ -290,4 +440,89 @@ func (a *App) handleCategoryDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.redirectRef(w, r, "/categories", "Category deactivated — history keeps its reference.")
+}
+
+// --- D35 in-page fragments + archive/unarchive (ADR-0011) ------------------
+// The Categories page loads once; tab/row/archive/unarchive are fetch swaps.
+// The two GET fragment endpoints return a single section; the archive and
+// unarchive POSTs return JSON, after which the client re-fetches the sections.
+
+// catPaneFragment returns the left-pane list for a class (in-page tab switch).
+func (a *App) catPaneFragment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	hh := sessionFromContext(ctx).Household
+	class := r.URL.Query().Get("class")
+	if !containsStr(categoryClasses, class) {
+		class = "expense"
+	}
+	rows, err := a.catPaneRows(ctx, hh, class)
+	if err != nil {
+		http.Error(w, "list categories: "+err.Error(), 500)
+		return
+	}
+	var selID int64
+	if len(rows) > 0 {
+		selID = rows[0].ID
+	}
+	a.renderFragment(w, r, http.StatusOK, "cat_pane", map[string]any{
+		"Class": class, "Rows": rows, "SelectedID": selID,
+	})
+}
+
+// catDetailFragment returns the detail pane for a category (in-page row switch).
+func (a *App) catDetailFragment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	hh := sessionFromContext(ctx).Household
+	id, ok := queryInt(r, "id")
+	if !ok {
+		http.Error(w, "bad id", 400)
+		return
+	}
+	detail, err := a.catDetailData(ctx, hh, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			a.renderFragment(w, r, http.StatusNotFound, "cat_detail", map[string]any{"Detail": catDetail{}})
+			return
+		}
+		http.Error(w, "load category: "+err.Error(), 500)
+		return
+	}
+	a.renderFragment(w, r, http.StatusOK, "cat_detail", map[string]any{"Detail": detail})
+}
+
+// setCatActive toggles a category's is_active (Archive = false, Unarchive =
+// true, the old "Deactivate" renamed per D35 Q4/Q8). It is reversible and keeps
+// all history. Returns JSON so the in-page client can re-fetch the changed
+// sections instead of reloading.
+func (a *App) setCatActive(w http.ResponseWriter, r *http.Request, active bool) {
+	id, ok := pathID(r)
+	if !ok {
+		http.Error(w, "bad id", 400)
+		return
+	}
+	ctx := r.Context()
+	hh := sessionFromContext(ctx).Household
+	tag := "archive"
+	if active {
+		tag = "unarchive"
+	}
+	if _, err := a.Pool.Exec(ctx,
+		`UPDATE category SET is_active = $1 WHERE id = $2 AND household_id = $3`,
+		active, id, hh); err != nil {
+		http.Error(w, tag+" category: "+err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// handleCategoryArchive soft-inactivates a category (the old "Deactivate").
+func (a *App) handleCategoryArchive(w http.ResponseWriter, r *http.Request) {
+	a.setCatActive(w, r, false)
+}
+
+// handleCategoryUnarchive restores an archived category.
+func (a *App) handleCategoryUnarchive(w http.ResponseWriter, r *http.Request) {
+	a.setCatActive(w, r, true)
 }

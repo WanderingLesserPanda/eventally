@@ -1,32 +1,109 @@
 {{define "page/reference_categories"}}
-<div class="card">
-  <div class="page-head">
-    <h1>Categories</h1>
-    <a class="btn-primary" href="/categories/new">＋ New category</a>
+<!-- D35 two-pane Categories page (docs/notes/d35-..., ADR-0011). The page loads
+     once, server-rendered; class-tab / row / archive / unarchive are in-page
+     fetch swaps (the catsPage Alpine component in layout.html). Create / edit
+     are full-page links in this batch — the modal form lands in Batch 3. -->
+<div class="cats" x-data="catsPage()" data-class="{{.Class}}" data-csrf="{{if .Session}}{{.Session.CSRFToken}}{{end}}">
+  <div class="cat-head">
+    <div>
+      <h1>Categories</h1>
+      <p class="muted small">A little order for where it all goes.</p>
+    </div>
   </div>
-  {{if .List}}
-  {{$root := .}}
-  <table>
-    <tr><th>Name</th><th>Class</th><th>Budget / month</th><th></th></tr>
-    {{range .List}}
-    <tr class="{{if not .Active}}inactive{{end}}">
-      <td>{{if .ParentName}}<span class="muted small">{{.ParentName}} ›</span> {{end}}<a href="/categories/{{.ID}}">{{.Name}}</a>
-        {{if not .Active}}<span class="tag">inactive</span>{{end}}</td>
-      <td><span class="tag">{{.Class}}</span></td>
-      <td class="money">{{if .HasBudget}}{{money .Budget}}{{else}}—{{end}}</td>
-      <td class="row-actions">
-        <a class="btn small" href="/categories/{{.ID}}">Edit</a>
-        <form method="post" action="/categories/{{.ID}}/deactivate" style="display:inline"
-              onsubmit="return confirm('Deactivate {{.Name}}? It stays in history.')">
-          {{template "csrf" $root}}
-          <button class="btn btn-danger small">Deactivate</button>
-        </form>
-      </td>
-    </tr>
-    {{end}}
-  </table>
-  {{else}}
-  <p>No categories yet — create a few before recording transactions.</p>
-  {{end}}
+
+  <div class="cat-toolbar">
+    <div class="cat-tabs" role="tablist">
+      {{range .Classes}}
+      <a class="cat-tab{{if eq . $.Class}} active{{end}}" data-class="{{.}}" role="tab" @click.prevent="switchClass('{{.}}')">{{classLabel .}}</a>
+      {{end}}
+    </div>
+    <a class="btn-primary" href="/categories/new">＋ Add Category</a>
+  </div>
+
+  <div class="cat-body">
+    <div class="cat-pane" id="cat-pane" role="tabpanel">
+      {{template "cat_pane" .}}
+    </div>
+    <div class="cat-div-v" aria-hidden="true"></div>
+    <div class="cat-detail" id="cat-detail" role="tabpanel">
+      {{template "cat_detail" .}}
+    </div>
+  </div>
 </div>
+{{end}}
+
+<!-- Left pane: one row per top-level category of the active class.
+     [drag grip][name][direct-subcategory count] (no per-category icon in the
+     left pane). Active rows list before archived (demoted, muted). Reusable:
+     the page renders it inline and the /categories/pane fragment re-renders it. -->
+{{define "cat_pane"}}
+{{if .Rows}}
+<ul class="cat-list">
+  {{range .Rows}}
+  <li class="cat-row{{if not .Active}} archived{{end}}{{if eq .ID $.SelectedID}} selected{{end}}"
+      data-id="{{.ID}}" @click="select({{.ID}})">
+    <i class="la la-grip-vertical cat-grip" title="Reorder"></i>
+    <span class="cat-name">{{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</span>
+    <span class="cat-count">{{.Count}}</span>
+  </li>
+  {{end}}
+</ul>
+{{else}}
+<p class="cat-empty">No {{classLabel .Class}} categories yet.</p>
+{{end}}
+{{end}}
+
+<!-- Right detail pane: [name][icon] header + Edit Category; the Total Budget
+     line; a three-column sub-table (the category itself first, then its
+     subcategories in sort_order), each row with Edit + Archive/Unarchive + a
+     reorder grip; + Add Subcategory directly below the table. The top-level
+     category's own Archive/Unarchive lives on its own sub-table row. Reusable:
+     the page renders it inline and the /categories/detail fragment re-renders it. -->
+{{define "cat_detail"}}
+{{if .Detail.Cat.ID}}
+{{$d := .Detail}}
+<div class="cat-detail-head">
+  <div class="cat-detail-title">
+    <span class="cat-detail-name">{{$d.Cat.Name}}</span>
+    {{catIcon $d.Cat.Icon}}
+  </div>
+  <a class="btn-link" href="/categories/{{$d.Cat.ID}}">Edit Category</a>
+</div>
+
+<div class="cat-total">
+  <span class="muted">Total Budget:</span>
+  <b>{{if $d.HasTotal}}{{money $d.Total}}{{else}}—{{end}}</b>
+</div>
+
+<table class="cat-subtable">
+  <tr>
+    <th>Subcategory Name</th>
+    <th class="money">Budget Allocation</th>
+    <th class="cat-op">Operation</th>
+  </tr>
+  <tr{{if not $d.Cat.Active}} class="archived"{{end}}>
+    <td class="cat-cell-name">{{catIcon $d.Cat.Icon}} {{$d.Cat.Name}}{{if not $d.Cat.Active}} <span class="tag">archived</span>{{end}}</td>
+    <td class="money">{{if $d.Cat.HasBudget}}{{money $d.Cat.Budget}}{{else}}—{{end}}</td>
+    <td class="cat-op">
+      <a class="btn-link small" href="/categories/{{$d.Cat.ID}}">Edit</a>
+      {{if $d.Cat.Active}}<button type="button" class="btn-link small" data-name="{{$d.Cat.Name}}" @click="archiveTop($event, {{$d.Cat.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveTop({{$d.Cat.ID}})">Unarchive</button>{{end}}
+      <i class="la la-grip-vertical cat-grip" title="Reorder"></i>
+    </td>
+  </tr>
+  {{range $d.Subs}}
+  <tr{{if not .Active}} class="archived"{{end}}>
+    <td class="cat-cell-name">{{catIcon .Icon}} {{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</td>
+    <td class="money">{{if .HasBudget}}{{money .Budget}}{{else}}—{{end}}</td>
+    <td class="cat-op">
+      <a class="btn-link small" href="/categories/{{.ID}}">Edit</a>
+      {{if .Active}}<button type="button" class="btn-link small" data-name="{{.Name}}" @click="archiveSub($event, {{.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveSub({{.ID}})">Unarchive</button>{{end}}
+      <i class="la la-grip-vertical cat-grip" title="Reorder"></i>
+    </td>
+  </tr>
+  {{end}}
+</table>
+<a class="cat-add-sub btn-link" href="/categories/new?parent={{$d.Cat.ID}}">＋ Add Subcategory</a>
+{{else}}
+<p class="cat-empty">Please add a category first.</p>
+{{end}}
 {{end}}

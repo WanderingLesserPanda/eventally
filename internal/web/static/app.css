@@ -379,3 +379,49 @@ a.hh-item { cursor: pointer; }
    .icon-cell); the row's 0.82rem font-size only sizes the label text. */
 .icon-cell-none { width: auto; padding: 0 0.7rem; font-size: 0.82rem; font-weight: 500; }
 .icon-cell-none .la { margin-right: 0.35rem; font-size: 1.75rem; }
+
+/* D35: two-pane Categories page (docs/notes/d35-..., ADR-0010/0011). The page
+   loads once; the panes are swapped in place by the catsPage Alpine component. */
+.cats { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+.cat-head h1 { margin-bottom: 0.1rem; }
+.cat-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  border-bottom: 1px solid var(--line); padding-bottom: 0.7rem; margin-bottom: 0.9rem;
+}
+.cat-tabs { display: flex; gap: 0.3rem; }
+.cat-tab { padding: 0.35rem 0.9rem; border-radius: 99px; color: var(--muted); font-weight: 600; font-size: 0.9rem; }
+.cat-tab:hover { color: var(--accent); }
+.cat-tab.active { background: var(--band); color: var(--accent); }
+.cat-body { display: flex; align-items: stretch; }
+.cat-pane { flex: 0 0 42%; min-width: 260px; }
+.cat-div-v { width: 1px; background: var(--line); margin: 0 1.2rem; }
+.cat-detail { flex: 1 1 auto; min-width: 0; }
+.cat-list { list-style: none; margin: 0; padding: 0; }
+.cat-row {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.6rem;
+  border-radius: 8px; cursor: pointer; border-left: 3px solid transparent;
+}
+.cat-row + .cat-row { margin-top: 0.15rem; }
+.cat-grip { color: var(--muted); opacity: 0.45; font-size: 1rem; }
+.cat-row .cat-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-row .cat-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.cat-row:hover { background: var(--bg); }
+.cat-row.selected { background: var(--sel); border-left-color: var(--accent); color: var(--accent); }
+.cat-row.selected .cat-grip, .cat-row.selected .cat-count { color: var(--accent); opacity: 0.7; }
+.cat-row.archived { opacity: 0.55; }
+.cat-empty { color: var(--muted); padding: 0.6rem 0.2rem; }
+.cat-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.6rem; }
+.cat-detail-title { display: flex; align-items: center; gap: 0.5rem; }
+.cat-detail-title .cat-detail-name { font-weight: 700; font-size: 1.1rem; }
+.cat-total { margin: 0 0 0.7rem; }
+.cat-subtable th { background: var(--band); }
+.cat-subtable .cat-cell-name .la { margin-right: 0.4rem; }
+.cat-subtable .cat-op { white-space: nowrap; }
+.cat-subtable .cat-op .cat-grip { margin-left: 0.7rem; }
+.cat-subtable tr.archived td { opacity: 0.55; }
+.cat-add-sub { display: inline-block; margin-top: 0.5rem; }
+@media (max-width: 760px) {
+  .cat-body { flex-direction: column; }
+  .cat-div-v { display: none; }
+  .cat-pane { flex: 1 1 auto; margin-bottom: 1rem; }
+}
