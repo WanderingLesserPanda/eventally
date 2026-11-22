@@ -166,6 +166,18 @@ func moneyPlain(m money.Money) string {
 	return s
 }
 
+// moneyNote renders a money value for the envelope warning notes: no currency
+// symbol, thousand separators, and no trailing ".00" when the amount is
+// whole, matching the settled wording (e.g. "Over-allocated by 500, ...
+// becomes 3,000."). Fractional amounts keep their cents ("1,500.50").
+func moneyNote(m money.Money) string {
+	s := m.Format("")
+	if strings.HasSuffix(s, ".00") {
+		s = strings.TrimSuffix(s, ".00")
+	}
+	return s
+}
+
 // dateFmt renders a date for templates.
 func dateFmt(t time.Time) string {
 	return t.Format("2 Jan 2006")

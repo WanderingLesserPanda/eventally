@@ -28,13 +28,17 @@ type Category struct {
 	Active     bool
 	// Icon is the D32 picked glyph key (la-*) from the registry; "" = unpicked.
 	Icon string
+	// BudgetMode is "standalone" (default; the sub's budget adds on) or
+	// "part_of_parent" (a slice of the parent's envelope). Meaningful only on a
+	// subcategory; a top-level category is always its own envelope.
+	BudgetMode string
 }
 
 // categorySelectOne lists the unqualified columns for a single-row category
 // SELECT (the edit handler and the detail pane load by id, no parent join).
 const categorySelectOne = `id, name, COALESCE(parent_id, 0), '', transaction_class,
 	COALESCE(budget_per_month, 0), budget_per_month IS NOT NULL, is_budgetable, is_active,
-	COALESCE(icon, '')`
+	COALESCE(icon, ''), COALESCE(budget_mode, 'standalone')`
 
 var categoryClasses = []string{"expense", "income", "transfer"}
 
@@ -53,6 +57,7 @@ type catDetail struct {
 	Subs     []Category
 	Total    money.Money
 	HasTotal bool
+	Note     string // warning note (over-allocation / no-budget parent), "" if none
 }
 
 func (a *App) listCategories(w http.ResponseWriter, r *http.Request) {
@@ -135,13 +140,13 @@ func (a *App) catDetailData(ctx context.Context, hh, id int64) (catDetail, error
 	err := a.Pool.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM category WHERE id = $2 AND household_id = $1`, categorySelectOne), hh, id).
 		Scan(&d.Cat.ID, &d.Cat.Name, &d.Cat.ParentID, &d.Cat.ParentName, &d.Cat.Class,
-			&d.Cat.Budget, &d.Cat.HasBudget, &d.Cat.Budgetable, &d.Cat.Active, &d.Cat.Icon)
+			&d.Cat.Budget, &d.Cat.HasBudget, &d.Cat.Budgetable, &d.Cat.Active, &d.Cat.Icon, &d.Cat.BudgetMode)
 	if err != nil {
 		return d, err
 	}
 	rows, err := a.Pool.Query(ctx, `
 		SELECT id, name, COALESCE(parent_id,0), '', transaction_class,
-		       COALESCE(budget_per_month,0), budget_per_month IS NOT NULL, is_budgetable, is_active, COALESCE(icon,'')
+		       COALESCE(budget_per_month,0), budget_per_month IS NOT NULL, is_budgetable, is_active, COALESCE(icon,''), COALESCE(budget_mode,'standalone')
 		FROM category WHERE household_id = $1 AND parent_id = $2
 		ORDER BY is_active DESC, sort_order, name`, hh, id)
 	if err != nil {
@@ -151,37 +156,72 @@ func (a *App) catDetailData(ctx context.Context, hh, id int64) (catDetail, error
 	for rows.Next() {
 		var s Category
 		if err := rows.Scan(&s.ID, &s.Name, &s.ParentID, &s.ParentName, &s.Class,
-			&s.Budget, &s.HasBudget, &s.Budgetable, &s.Active, &s.Icon); err != nil {
+			&s.Budget, &s.HasBudget, &s.Budgetable, &s.Active, &s.Icon, &s.BudgetMode); err != nil {
 			return d, err
 		}
 		d.Subs = append(d.Subs, s)
 	}
-	d.Total, d.HasTotal = catEnvelopeTotal(d.Cat, d.Subs)
+	d.Total, d.HasTotal, d.Note = catEnvelopeTotal(d.Cat, d.Subs)
 	return d, nil
 }
 
-// catEnvelopeTotal computes the detail-pane "Total Budget" line.
-//
-// Batch 2 (pre-000020): there is no budget_mode column yet, so every
-// subcategory is standalone and its budget adds on; the total is the parent's
-// own budget plus the sum of its sub budgets. Batch 4 extends this to the full
-// two-mode envelope rule (ADR-0012) once category.budget_mode exists:
+// catEnvelopeTotal computes the detail-pane "Total Budget" line with the full
+// two-mode envelope rule (ADR-0012, wave doc §D):
 //
 //	total = (Σ standalone sub budgets) + max(parent's own budget, Σ part-of-parent slices)
 //
-// The detail template is unchanged between batches; only this computation grows.
-func catEnvelopeTotal(cat Category, subs []Category) (total money.Money, hasTotal bool) {
+// It returns a warning note for the two overflow cases (wave doc §D, verbatim
+// wording, house style: commas, no em-dashes, no possessives):
+//   - slices exceed the parent's budget  -> over-allocation
+//   - the parent has no budget + slices  -> the slices add on (informational)
+//
+// The total is computed at display time and never written back.
+func catEnvelopeTotal(cat Category, subs []Category) (total money.Money, hasTotal bool, note string) {
+	var own, standalone, slice money.Money
 	if cat.HasBudget {
-		total = cat.Budget
-		hasTotal = true
+		own = cat.Budget
 	}
-	for _, s := range subs {
-		if s.HasBudget {
-			total = total.Add(s.Budget)
-			hasTotal = true
+	var firstSlice *Category
+	sliceCount := 0
+	for i := range subs {
+		s := &subs[i]
+		if !s.HasBudget {
+			continue
+		}
+		if s.BudgetMode == "part_of_parent" {
+			slice = slice.Add(s.Budget)
+			sliceCount++
+			if firstSlice == nil {
+				firstSlice = s
+			}
+		} else {
+			standalone = standalone.Add(s.Budget)
 		}
 	}
-	return total, hasTotal
+	total = standalone
+	if own >= slice {
+		total = total.Add(own)
+	} else {
+		total = total.Add(slice)
+	}
+	hasTotal = cat.HasBudget || total > 0
+
+	switch {
+	case cat.HasBudget && slice > own:
+		// Slices exceed the parent's envelope: the excess simply auto add-ons.
+		note = fmt.Sprintf("Over-allocated by %s, the total budget for %s becomes %s.",
+			moneyNote(slice-own), cat.Name, moneyNote(total))
+	case !cat.HasBudget && sliceCount > 0:
+		// No parent budget: the slices add on, so the total is informational.
+		if sliceCount == 1 {
+			note = fmt.Sprintf("No budget on %s, %s from %s adds to the total.",
+				cat.Name, moneyNote(firstSlice.Budget), firstSlice.Name)
+		} else {
+			note = fmt.Sprintf("No budget on %s, %s from %d subcategories adds to the total.",
+				cat.Name, moneyNote(slice), sliceCount)
+		}
+	}
+	return total, hasTotal, note
 }
 
 // classLabel is the human class name for tabs and empty states.
@@ -319,6 +359,22 @@ func (a *App) parseCategoryForm(r *http.Request, f CategoryForm) CategoryForm {
 		f.Err = "Unknown icon."
 		return f
 	}
+	// D35 §D: budget mode. The form sends "part_of_parent" only when the
+	// subcategory's budget-mode checkbox is checked; otherwise it is absent
+	// (standalone). App-side validation (standalone | part_of_parent). A
+	// top-level category has no parent envelope, so it is always standalone.
+	switch m := r.FormValue("budget_mode"); m {
+	case "", "standalone":
+		f.BudgetMode = "standalone"
+	case "part_of_parent":
+		f.BudgetMode = "part_of_parent"
+	default:
+		f.Err = "Unknown budget mode."
+		return f
+	}
+	if f.ParentID == 0 {
+		f.BudgetMode = "standalone"
+	}
 	return f
 }
 
@@ -383,9 +439,9 @@ func (a *App) handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
 		budget = f.Budget
 	}
 	_, err := a.Pool.Exec(r.Context(),
-		`INSERT INTO category (household_id, name, parent_id, transaction_class, budget_per_month, is_budgetable, icon)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		hh, f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon))
+		`INSERT INTO category (household_id, name, parent_id, transaction_class, budget_per_month, is_budgetable, icon, budget_mode)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		hh, f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon), f.BudgetMode)
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "A category with this name already exists."
@@ -416,7 +472,7 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 	err := a.Pool.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM category WHERE id = $2 AND household_id = $1`, categorySelectOne), hh, id).
 		Scan(&cur.ID, &cur.Name, &cur.ParentID, &cur.ParentName, &cur.Class,
-			&cur.Budget, &cur.HasBudget, &cur.Budgetable, &cur.Active, &cur.Icon)
+			&cur.Budget, &cur.HasBudget, &cur.Budgetable, &cur.Active, &cur.Icon, &cur.BudgetMode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.Error(w, "not found", 404)
 		return
@@ -460,8 +516,9 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = a.Pool.Exec(ctx,
 		`UPDATE category SET name=$1, parent_id=$2, transaction_class=$3,
-		 budget_per_month=$4, is_budgetable=$5, icon=$6 WHERE id=$7 AND household_id=$8`,
-		f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon), id, hh)
+		 budget_per_month=$4, is_budgetable=$5, icon=$6, budget_mode=$7
+		 WHERE id=$8 AND household_id=$9`,
+		f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon), f.BudgetMode, id, hh)
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "A category with this name already exists."

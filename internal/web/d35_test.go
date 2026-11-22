@@ -69,6 +69,42 @@ func d35Cat(t *testing.T, pool *pgxpool.Pool, hh int64, name, class string, pare
 	return id
 }
 
+// d35CatMode is d35Cat with an explicit budget_mode ("standalone" or
+// "part_of_parent"). parent==0 = top level; budget=="" = no budget; mode==""
+// defaults to standalone.
+func d35CatMode(t *testing.T, pool *pgxpool.Pool, hh int64, name, class string, parent int64, budget, mode string, sortOrder int) int64 {
+	t.Helper()
+	var parentArg, budgetArg any
+	if parent > 0 {
+		parentArg = parent
+	}
+	if budget != "" {
+		budgetArg = budget
+	}
+	if mode == "" {
+		mode = "standalone"
+	}
+	var id int64
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO category (household_id, name, parent_id, transaction_class, budget_per_month, budget_mode, sort_order)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+		hh, name, parentArg, class, budgetArg, mode, sortOrder).Scan(&id); err != nil {
+		t.Fatalf("insert category %s: %v", name, err)
+	}
+	return id
+}
+
+// d35Detail renders the in-page detail-fragment HTML for a category id
+// (the cat_detail pane with the Total Budget line and the envelope note).
+func d35Detail(t *testing.T, a *App, sess *auth.Session, id int64) string {
+	t.Helper()
+	rec := d32Get(t, a, sess, a.catDetailFragment, "/categories/detail?id="+strconv.FormatInt(id, 10), 0)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET detail id=%d: HTTP %d, body: %s", id, rec.Code, rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
 // d35Page renders the full Categories page for a query string and returns the
 // HTML (failing the test on a non-200).
 func d35Page(t *testing.T, a *App, sess *auth.Session, query string) string {
@@ -506,5 +542,109 @@ func TestD35InPageEdit(t *testing.T) {
 	}
 	if name != "NewName" {
 		t.Errorf("edit should rename to NewName, got %q", name)
+	}
+}
+
+// TestD35Envelope exercises the two-mode envelope total (ADR-0012, wave doc §D):
+//
+//	total = (Σ standalone sub budgets) + max(parent budget, Σ part-of-parent slices)
+//
+// The five pinned scenarios plus the plural no-budget note branch.
+func TestD35Envelope(t *testing.T) {
+	type sub struct{ name, budget, mode string }
+	cases := []struct {
+		name      string
+		parentB   string
+		subs      []sub
+		wantTotal string // rendered money on the Total Budget line
+		wantNote  string // exact note text ("" = no note)
+	}{
+		{
+			name: "all standalone", parentB: "1000",
+			subs: []sub{{"Groceries", "500", "standalone"}, {"Dining", "300", "standalone"}},
+			wantTotal: "RM 1,800.00", wantNote: "",
+		},
+		{
+			name: "mixed standalone and part of parent", parentB: "1000",
+			subs: []sub{{"Groceries", "500", "standalone"}, {"Dining", "400", "part_of_parent"}},
+			wantTotal: "RM 1,500.00", wantNote: "",
+		},
+		{
+			name: "over allocation", parentB: "1000",
+			subs: []sub{{"Groceries", "800", "part_of_parent"}, {"Dining", "700", "part_of_parent"}},
+			wantTotal: "RM 1,500.00",
+			wantNote:  "Over-allocated by 500, the total budget for Food becomes 1,500.",
+		},
+		{
+			name: "no budget parent single slice", parentB: "",
+			subs: []sub{{"Groceries", "1500", "part_of_parent"}},
+			wantTotal: "RM 1,500.00",
+			wantNote:  "No budget on Food, 1,500 from Groceries adds to the total.",
+		},
+		{
+			name: "all part of parent under envelope", parentB: "2000",
+			subs: []sub{{"Groceries", "800", "part_of_parent"}, {"Dining", "900", "part_of_parent"}},
+			wantTotal: "RM 2,000.00", wantNote: "",
+		},
+		{
+			name: "no budget parent multiple slices", parentB: "",
+			subs: []sub{{"Groceries", "600", "part_of_parent"}, {"Dining", "900", "part_of_parent"}},
+			wantTotal: "RM 1,500.00",
+			wantNote:  "No budget on Food, 1,500 from 2 subcategories adds to the total.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, pool, sess := d35App(t)
+			parent := d35CatMode(t, pool, sess.Household, "Food", "expense", 0, tc.parentB, "standalone", 0)
+			for _, s := range tc.subs {
+				d35CatMode(t, pool, sess.Household, s.name, "expense", parent, s.budget, s.mode, 0)
+			}
+			body := d35Detail(t, a, sess, parent)
+			wantTotalLine := ">Total Budget:</span>\n  <b>" + tc.wantTotal + "</b>"
+			if !strings.Contains(body, wantTotalLine) {
+				t.Fatalf("Total Budget line missing %q in:\n%s", tc.wantTotal, body)
+			}
+			if tc.wantNote == "" {
+				if strings.Contains(body, `class="cat-note`) {
+					t.Errorf("expected no envelope note, but found one in:\n%s", body)
+				}
+			} else if !strings.Contains(body, tc.wantNote) {
+				t.Errorf("missing note %q in:\n%s", tc.wantNote, body)
+			}
+		})
+	}
+}
+
+// TestD35FormBudgetModePrefill: the budget-mode checkbox pre-fills its checked
+// state server-side (part_of_parent = checked; standalone / top-level = not).
+// The checkbox is always in the markup (Alpine x-show="pid" hides it client-side
+// when no parent is picked), so a static GET is enough to assert the checked bit.
+func TestD35FormBudgetModePrefill(t *testing.T) {
+	a, pool, sess := d35App(t)
+	parent := d35Cat(t, pool, sess.Household, "Food", "expense", 0, "1000", 0)
+	pop := d35CatMode(t, pool, sess.Household, "Groceries", "expense", parent, "500", "part_of_parent", 0)
+	stand := d35CatMode(t, pool, sess.Household, "Dining", "expense", parent, "500", "standalone", 0)
+
+	editForm := func(id int64) string {
+		t.Helper()
+		rec := d32Get(t, a, sess, a.handleCategoryEdit, "/categories/"+strconv.FormatInt(id, 10), id)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("edit form id=%d: HTTP %d body %s", id, rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	const checked = `name="budget_mode" value="part_of_parent" checked>`
+	// A part_of_parent sub pre-fills the checkbox checked.
+	if !strings.Contains(editForm(pop), checked) {
+		t.Errorf("part_of_parent sub form should pre-fill the checkbox checked")
+	}
+	// A standalone sub does NOT.
+	if strings.Contains(editForm(stand), checked) {
+		t.Errorf("standalone sub form should NOT pre-fill the checkbox checked")
+	}
+	// A top-level category does NOT (it has no parent envelope).
+	if strings.Contains(editForm(parent), checked) {
+		t.Errorf("top-level form should NOT pre-fill the checkbox checked")
 	}
 }

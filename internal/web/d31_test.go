@@ -363,8 +363,8 @@ func TestD31BackfillEquivalence(t *testing.T) {
 	if err := goose.Up(sqlDB, "migrations"); err != nil {
 		t.Fatalf("apply 000016: %v", err)
 	}
-	if n := q(`SELECT max(version_id) FROM goose_db_version`); n != 19 {
-		t.Fatalf("version = %d, want 19", n)
+	if n := q(`SELECT max(version_id) FROM goose_db_version`); n != 20 {
+		t.Fatalf("version = %d, want 20", n)
 	}
 	// One leg per settlement, exactly.
 	if n := q(`SELECT count(*) FROM settlement_funding`); n != 2 {

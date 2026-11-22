@@ -87,6 +87,7 @@
   <span class="muted">Total Budget:</span>
   <b>{{if $d.HasTotal}}{{money $d.Total}}{{else}}—{{end}}</b>
 </div>
+{{if $d.Note}}<p class="cat-note warn" role="note">{{ $d.Note }}</p>{{end}}
 
 <table class="cat-subtable">
   <tr>
@@ -106,7 +107,7 @@
   <tr{{if not .Active}} class="archived"{{end}} data-child data-id="{{.ID}}"
       draggable="true" @dragstart="dragStart($event,'sub')" @dragover.prevent="dragOver($event)" @dragend="dragEnd($event,'sub')">
     <td class="cat-cell-name">{{catIcon .Icon}} {{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</td>
-    <td class="money">{{if .HasBudget}}{{money .Budget}}{{else}}—{{end}}</td>
+    <td class="money">{{if .HasBudget}}{{money .Budget}}{{if eq .BudgetMode "part_of_parent"}} <span class="muted small">(of parent)</span>{{end}}{{else}}—{{end}}</td>
     <td class="cat-op">
       <a class="btn-link small" href="/categories/{{.ID}}" @click.prevent="openForm('edit', {{.ID}}, 0)">Edit</a>
       {{if .Active}}<button type="button" class="btn-link small" data-name="{{.Name}}" @click="archiveSub($event, {{.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveSub({{.ID}})">Unarchive</button>{{end}}

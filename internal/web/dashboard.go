@@ -57,10 +57,19 @@ func (a *App) dashCategoryRows(ctx context.Context, p *perms, hh, user int64, mo
 			WHERE c.household_id = $1 AND c.is_active
 		)
 		SELECT tops.id, tops.name, COALESCE(tops.icon, ''),
-		       (SELECT COALESCE(SUM(COALESCE(c.budget_per_month, 0)), 0)
-		        FROM category c JOIN tree t ON t.id = c.id
-		        WHERE c.household_id = $1 AND c.is_active
-		          AND t.root_id = tops.id),
+		       ( -- envelope total: (Σ standalone subs) + GREATEST(own budget, Σ slices)
+		         (SELECT COALESCE(SUM(COALESCE(c.budget_per_month, 0)), 0)
+		          FROM category c
+		          WHERE c.household_id = $1 AND c.is_active AND c.parent_id = tops.id
+		            AND COALESCE(c.budget_mode, 'standalone') <> 'part_of_parent')
+		         + GREATEST(
+		           COALESCE(tops.budget_per_month, 0),
+		           (SELECT COALESCE(SUM(COALESCE(c.budget_per_month, 0)), 0)
+		            FROM category c
+		            WHERE c.household_id = $1 AND c.is_active AND c.parent_id = tops.id
+		              AND c.budget_mode = 'part_of_parent')
+		        )
+		       ),
 		       (SELECT COALESCE(SUM(a.total_amount), 0) FROM "transaction" a
 		        WHERE a.household_id = $1 AND a.record_status <> 'void'
 		          AND NOT (a.is_synced AND a.record_status = 'pending')
