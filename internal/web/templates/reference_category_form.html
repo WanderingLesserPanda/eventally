@@ -1,6 +1,17 @@
 {{define "page/reference_category_form"}}
-<div class="card" x-data="iconPicker('{{.F.Icon}}', '{{iconStyle .F.Icon}}')">
+<div class="card">
   <h1>{{if .Editing}}Edit category{{else}}New category{{end}}</h1>
+  {{template "cat_form" .}}
+</div>
+{{end}}
+
+<!-- cat_form: the add/edit category form, shared by the full page (above) and
+     the in-page modal (D35 §G, ADR-0011). The icon picker's Alpine scope sits
+     on the wrapping div; in the modal it opens as a second modal (accepted
+     modal-over-modal). The server renders it as a fragment when the request
+     carries X-Requested-With: fetch; a plain browser submit still works. -->
+{{define "cat_form"}}
+<div x-data="iconPicker('{{.F.Icon}}', '{{iconStyle .F.Icon}}')">
   {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
   <form method="post" action="{{if .Editing}}/categories/{{.F.ID}}{{else}}/categories{{end}}">
     {{template "csrf" .}}
@@ -20,7 +31,7 @@
         </select>
       </label>
       <label>Monthly budget <span class="muted small">(optional)</span>
-        <input type="text" name="budget" value="{{if .F.HasBudget}}{{.F.Budget}}{{end}}" placeholder="1500">
+        <input type="text" name="budget" value="{{if .F.HasBudget}}{{moneyPlain .F.Budget}}{{end}}" placeholder="1500">
       </label>
     </div>
     <label class="checkline"><input type="checkbox" name="budgetable" {{if .F.Budgetable}}checked{{end}}> Counted in budget reports</label>

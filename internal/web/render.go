@@ -147,6 +147,25 @@ func moneyFmt(m money.Money) string {
 	return m.Format("RM")
 }
 
+// moneyPlain renders a money value as a plain decimal with no thousand
+// separators (e.g. "2500.00") for form inputs that must round-trip through
+// money.Parse, which rejects commas. The display side keeps moneyFmt (with
+// separators + currency); only the budget input uses this.
+func moneyPlain(m money.Money) string {
+	neg := m < 0
+	abs := int64(m)
+	if neg {
+		abs = -abs
+	}
+	units := abs / money.CentsPerUnit
+	frac := abs % money.CentsPerUnit
+	s := fmt.Sprintf("%d.%02d", units, frac)
+	if neg {
+		s = "-" + s
+	}
+	return s
+}
+
 // dateFmt renders a date for templates.
 func dateFmt(t time.Time) string {
 	return t.Format("2 Jan 2006")

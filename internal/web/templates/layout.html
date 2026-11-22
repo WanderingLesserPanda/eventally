@@ -49,15 +49,23 @@ document.addEventListener('alpine:init', () => {
 // fragment replaces a pane; a POST returns JSON and the changed panes are
 // re-fetched). No full page reload, no new libraries.
 document.addEventListener('alpine:init', () => {
+  function arrEq(a, b) { return a.length === b.length && a.every((x, i) => x === b[i]); }
   Alpine.data('catsPage', () => ({
     cls: 'expense',
     csrf: '',
     selected: null,
+    // Save Sort staged state (D35 §C): a staged order is an array of row ids in
+    // the current (dragged) order; null = clean. topClean/subClean are the
+    // server orders captured on pane load, so a no-op drag is not "dirty".
+    topOrder: null, subOrder: null, topClean: [], subClean: [],
+    dragEl: null, dragSurface: null,
     $init() {
       this.cls = this.$el.dataset.class || 'expense';
       this.csrf = this.$el.dataset.csrf || '';
       const sel = this.$el.querySelector('#cat-pane .cat-row.selected');
       if (sel) this.selected = sel.dataset.id;
+      this.topClean = this.leftIDs();
+      this.subClean = this.subIDs();
     },
     pane() { return this.$el.querySelector('#cat-pane'); },
     detail() { return this.$el.querySelector('#cat-detail'); },
@@ -71,29 +79,123 @@ document.addEventListener('alpine:init', () => {
       this.cls = c;
       this.$el.dataset.class = c;
       this.$el.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.class === c));
+      this.topOrder = null;
       this.pane().innerHTML = await this.fetchText('/categories/pane?class=' + encodeURIComponent(c));
+      this.topClean = this.leftIDs();
       const first = this.pane().querySelector('.cat-row');
       if (first) return this.loadDetail(first.dataset.id);
+      this.subOrder = null; this.subClean = [];
       this.detail().innerHTML = '<p class="cat-empty">Please add a category first.</p>';
     },
     // Row switch: mark the row selected and swap the detail pane in place.
     async loadDetail(id) {
       this.selected = String(id);
       this.$el.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
+      this.subOrder = null;
       this.detail().innerHTML = await this.fetchText('/categories/detail?id=' + encodeURIComponent(id));
+      this.subClean = this.subIDs();
     },
     select(id) { return this.loadDetail(id); },
-    // A mutation POST (archive / unarchive). CSRF rides in the body; on success
-    // the caller re-fetches the changed pane(s).
-    post(url) {
+    // --- D35 §G: the add/edit modal. openForm() fetches the cat_form fragment
+    //     in by id; submitForm() posts by fetch (no reload), re-injects the form
+    //     on a validation error, and on success closes the modal + re-fetches
+    //     the panes. The D32 icon picker inside the form opens as a second modal.
+    formOpen: false,
+    formHost() { return this.$el.querySelector('#cat-form-host'); },
+    closeForm() { this.formOpen = false; },
+    async openForm(mode, id, parent) {
+      const url = (mode === 'edit')
+        ? '/categories/' + encodeURIComponent(id)
+        : '/categories/new?class=' + encodeURIComponent(this.cls) + (parent ? '&parent=' + encodeURIComponent(parent) : '');
+      this.formOpen = true;
+      const host = this.formHost();
+      host.innerHTML = '<p class="muted small">Loading…</p>';
+      try { host.innerHTML = await this.fetchText(url); } catch (e) { return; }
+      if (window.Alpine) window.Alpine.initTree(host); // init the nested iconPicker x-data deterministically
+      this.wireForm(host.querySelector('form'));
+    },
+    // In the modal the injected form submits by fetch and Cancel closes it; in
+    // the full page the same form submits normally (no listener attached).
+    wireForm(form) {
+      if (!form) return;
+      form.onsubmit = (e) => { e.preventDefault(); return this.submitForm(form); };
+      const cancel = form.querySelector('a[href="/categories"]');
+      if (cancel) cancel.onclick = (e) => { e.preventDefault(); this.closeForm(); };
+    },
+    async submitForm(form) {
+      const body = new URLSearchParams(new FormData(form)).toString();
+      const r = await fetch(form.action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': this.csrf, 'X-Requested-With': 'fetch' },
+        body,
+      });
+      if (!r.ok) { alert('Save failed (HTTP ' + r.status + ')'); return; }
+      const ct = r.headers.get('Content-Type') || '';
+      if (ct.includes('application/json')) {
+        this.closeForm();
+        await this.reswap();
+      } else {
+        // re-rendered form (validation error): re-inject and re-wire
+        const host = this.formHost();
+        host.innerHTML = await r.text();
+        if (window.Alpine) window.Alpine.initTree(host);
+        this.wireForm(host.querySelector('form'));
+      }
+    },
+    // A mutation POST (archive / unarchive / sort). CSRF rides in the body; on
+    // success the caller re-fetches the changed pane(s). params merges into the
+    // body (the Save Sort POST sends class/level/parent_id/ids).
+    post(url, params = {}) {
+      const body = new URLSearchParams(Object.assign({ csrf: this.csrf }, params)).toString();
       return fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': this.csrf },
-        body: 'csrf=' + encodeURIComponent(this.csrf),
+        body,
       }).then(r => {
         if (!r.ok) { alert('Action failed (HTTP ' + r.status + ')'); throw new Error('HTTP ' + r.status); }
         return r;
       });
+    },
+    // --- Save Sort (drag preview, staged commit) ---
+    leftIDs() { return Array.from(this.$el.querySelectorAll('#cat-pane .cat-row')).map(r => r.dataset.id); },
+    subIDs() { return Array.from(this.$el.querySelectorAll('#cat-detail tr[data-child]')).map(r => r.dataset.id); },
+    sortDirty() { return !!(this.topOrder || this.subOrder); },
+    dragStart(evt, surface) {
+      this.dragEl = evt.target.closest('li, tr');
+      this.dragSurface = surface;
+      try { evt.dataTransfer.effectAllowed = 'move'; evt.dataTransfer.setData('text/plain', ''); } catch (e) { /* Safari */ }
+    },
+    // Live preview: move the dragged row before/after the row under the cursor.
+    dragOver(evt) {
+      if (!this.dragEl) return;
+      const over = this.dragSurface === 'top'
+        ? evt.target.closest('#cat-pane .cat-row')
+        : evt.target.closest('#cat-detail tr[data-child]');
+      if (!over || over === this.dragEl) return;
+      const rect = over.getBoundingClientRect();
+      const before = (evt.clientY - rect.top) < rect.height / 2;
+      const parent = this.dragEl.parentNode;
+      if (before) parent.insertBefore(this.dragEl, over);
+      else if (over.nextSibling) parent.insertBefore(this.dragEl, over.nextSibling);
+      else parent.appendChild(this.dragEl);
+    },
+    dragEnd(evt, surface) {
+      const order = (surface === 'top') ? this.leftIDs() : this.subIDs();
+      const clean = (surface === 'top') ? this.topClean : this.subClean;
+      if (surface === 'top') this.topOrder = arrEq(order, clean) ? null : order;
+      else this.subOrder = arrEq(order, clean) ? null : order;
+      this.dragEl = null; this.dragSurface = null;
+    },
+    // One POST per dirty level (top-level of the active class, and the selected
+    // category's children); each renumbers sort_order 0..N. Then re-confirm.
+    async saveSort() {
+      const jobs = [];
+      if (this.topOrder) jobs.push(this.post('/categories/sort', { class: this.cls, level: 'top', ids: this.topOrder.join(',') }));
+      if (this.subOrder) jobs.push(this.post('/categories/sort', { class: this.cls, level: 'sub', parent_id: this.selected, ids: this.subOrder.join(',') }));
+      if (!jobs.length) return;
+      await Promise.all(jobs);
+      this.topOrder = null; this.subOrder = null;
+      await this.reswap();
     },
     // Top-level archive / unarchive (the category's own sub-table row): both
     // panes change (the row demotes + the detail shows Unarchive), so reswap.
@@ -113,9 +215,12 @@ document.addEventListener('alpine:init', () => {
     // Re-fetch the left pane for the active class and the detail for the
     // currently selected category, re-applying the selection.
     async reswap() {
+      this.topOrder = null; this.subOrder = null;
       this.pane().innerHTML = await this.fetchText('/categories/pane?class=' + encodeURIComponent(this.cls));
+      this.topClean = this.leftIDs();
       this.$el.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
       if (this.selected) return this.loadDetail(this.selected);
+      this.subClean = [];
       this.detail().innerHTML = '<p class="cat-empty">Please add a category first.</p>';
     },
   }));

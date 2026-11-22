@@ -41,6 +41,7 @@ func New(pool *pgxpool.Pool, tmplDir, dataDir string) (*App, error) {
 		"acctIcon":  acctIcon,
 		"humanType": acctTypeLabel,
 		"utilPct":   utilPct,
+		"moneyPlain": moneyPlain,
 	}
 	tmpl, err := template.New("").Funcs(funcs).ParseGlob(filepath.Join(tmplDir, "*.html"))
 	if err != nil {
@@ -113,6 +114,7 @@ func (a *App) Router() http.Handler {
 		authed.Get("/categories/detail", a.catDetailFragment)
 		authed.Get("/categories/new", a.handleCategoryCreate)
 		authed.Post("/categories", a.handleCategoryCreate)
+		authed.Post("/categories/sort", a.handleCategorySort)
 		authed.Post("/categories/{id}/archive", a.handleCategoryArchive)
 		authed.Post("/categories/{id}/unarchive", a.handleCategoryUnarchive)
 		authed.Get("/categories/{id}", a.handleCategoryEdit)

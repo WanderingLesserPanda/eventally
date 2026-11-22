@@ -10,13 +10,17 @@ package web
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/WanderingLesserPanda/eventally/internal/auth"
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -303,5 +307,204 @@ func TestD35CreateParentPreselect(t *testing.T) {
 	}
 	if !strings.Contains(body, `value="expense" selected`) {
 		t.Errorf("the class should be preselected in the form")
+	}
+}
+
+// TestD35SaveSortRoundTrip: the staged Save Sort endpoint renumbers sort_order
+// 0..N over the posted id list, for the top level of a class and for a
+// parent's children; a stale/mismatched list is a 400 (no partial write).
+// D35 §C / Q3 / Q13.
+func TestD35SaveSortRoundTrip(t *testing.T) {
+	a, pool, sess := d35App(t)
+	ctx := context.Background()
+	aID := d35Cat(t, pool, sess.Household, "A", "expense", 0, "", 0)
+	bID := d35Cat(t, pool, sess.Household, "B", "expense", 0, "", 1)
+	cID := d35Cat(t, pool, sess.Household, "C", "expense", 0, "", 2)
+
+	rec := httptest.NewRecorder()
+	form := url.Values{"class": {"expense"}, "level": {"top"}, "ids": {fmt.Sprintf("%d,%d,%d", cID, aID, bID)}}
+	a.handleCategorySort(rec, d30Req(t, ctx, sess, "/categories/sort", 0, form))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("top sort: HTTP %d body %s", rec.Code, rec.Body.String())
+	}
+	if got := d35SortOf(t, pool, cID, aID, bID); got != "0,1,2" {
+		t.Errorf("top-level renumber c,a,b = %q, want 0,1,2", got)
+	}
+
+	// Sub level: a new parent with three children, reordered.
+	p := d35Cat(t, pool, sess.Household, "Parent", "expense", 0, "", 3)
+	x := d35Cat(t, pool, sess.Household, "X", "expense", p, "", 0)
+	y := d35Cat(t, pool, sess.Household, "Y", "expense", p, "", 1)
+	z := d35Cat(t, pool, sess.Household, "Z", "expense", p, "", 2)
+	rec = httptest.NewRecorder()
+	form = url.Values{"class": {"expense"}, "level": {"sub"}, "parent_id": {fmt.Sprintf("%d", p)}, "ids": {fmt.Sprintf("%d,%d,%d", y, z, x)}}
+	a.handleCategorySort(rec, d30Req(t, ctx, sess, "/categories/sort", 0, form))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("sub sort: HTTP %d body %s", rec.Code, rec.Body.String())
+	}
+	if got := d35SortOf(t, pool, y, z, x); got != "0,1,2" {
+		t.Errorf("sub renumber y,z,x = %q, want 0,1,2", got)
+	}
+
+	// A stale top-level list (categories dropped) is a 400, not a partial write.
+	rec = httptest.NewRecorder()
+	form = url.Values{"class": {"expense"}, "level": {"top"}, "ids": {fmt.Sprintf("%d,%d", aID, bID)}}
+	a.handleCategorySort(rec, d30Req(t, ctx, sess, "/categories/sort", 0, form))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("stale top sort should be 400, got %d", rec.Code)
+	}
+}
+
+// d35SortOf returns the sort_order of the given ids, joined by commas.
+func d35SortOf(t *testing.T, pool *pgxpool.Pool, ids ...int64) string {
+	t.Helper()
+	var out []string
+	for _, id := range ids {
+		var s int
+		if err := pool.QueryRow(context.Background(), `SELECT sort_order FROM category WHERE id = $1`, id).Scan(&s); err != nil {
+			t.Fatalf("read sort_order %d: %v", id, err)
+		}
+		out = append(out, strconv.Itoa(s))
+	}
+	return strings.Join(out, ",")
+}
+
+// --- D35 §G modal form: in-page fetch-marker request helpers ---------------
+// The modal form GET/POST carry X-Requested-With: fetch; the handlers answer
+// with a fragment/JSON instead of a full page/redirect. These helpers set the
+// marker + session (middleware bypassed, like the other D35 tests).
+
+func d35FetchGet(t *testing.T, a *App, sess *auth.Session, h http.HandlerFunc, path string, id int64) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("X-Requested-With", "fetch")
+	if id > 0 {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", strconv.FormatInt(id, 10))
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+	}
+	r = r.WithContext(contextWithSession(r.Context(), sess))
+	rec := httptest.NewRecorder()
+	h(rec, r)
+	return rec
+}
+
+func d35FetchPost(t *testing.T, a *App, sess *auth.Session, h http.HandlerFunc, path string, id int64, form url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	var body io.Reader
+	if form != nil {
+		body = strings.NewReader(form.Encode())
+	}
+	r := httptest.NewRequest(http.MethodPost, path, body)
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("X-Requested-With", "fetch")
+	if err := r.ParseForm(); err != nil {
+		t.Fatalf("ParseForm: %v", err)
+	}
+	if id > 0 {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", strconv.FormatInt(id, 10))
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+	}
+	r = r.WithContext(contextWithSession(r.Context(), sess))
+	rec := httptest.NewRecorder()
+	h(rec, r)
+	return rec
+}
+
+// TestD35FormFragment: the in-page form GET returns just the cat_form fragment
+// (unwrapped, no layout), preselected for new (?class=/?parent=) and pre-filled
+// for edit (by id), with the csrf field present.
+func TestD35FormFragment(t *testing.T) {
+	a, pool, sess := d35App(t)
+	parent := d35Cat(t, pool, sess.Household, "Food", "expense", 0, "1000", 0)
+
+	rec := d35FetchGet(t, a, sess, a.handleCategoryCreate,
+		"/categories/new?class=income&parent="+strconv.FormatInt(parent, 10), 0)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("new form fragment: HTTP %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`name="name"`, `name="transaction_class"`, `name="parent_id"`,
+		`name="budget"`, `name="budgetable"`, `name="icon"`, `name="csrf"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("form fragment missing field %s", want)
+		}
+	}
+	if !strings.Contains(body, `value="income" selected`) {
+		t.Errorf("class should be preselected (income)")
+	}
+	if !strings.Contains(body, `value="`+strconv.FormatInt(parent, 10)+`" selected`) {
+		t.Errorf("parent should be preselected")
+	}
+	if strings.Contains(body, `<header`) || strings.Contains(body, `class="topbar"`) || strings.Contains(body, "cat-toolbar") {
+		t.Errorf("form fragment should be unwrapped (no layout/topbar)")
+	}
+
+	eid := d35Cat(t, pool, sess.Household, "Renamed", "expense", 0, "2500", 1)
+	rec = d35FetchGet(t, a, sess, a.handleCategoryEdit, "/categories/"+strconv.FormatInt(eid, 10), eid)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edit form fragment: HTTP %d", rec.Code)
+	}
+	eb := rec.Body.String()
+	if !strings.Contains(eb, `value="Renamed"`) || !strings.Contains(eb, `value="2500.00"`) {
+		t.Errorf("edit form not pre-filled; name-present=%v budget-present=%v",
+			strings.Contains(eb, `value="Renamed"`), strings.Contains(eb, `value="2500.00"`))
+	}
+}
+
+// TestD35InPageCreate: an in-page create POST replies JSON ok (not a redirect)
+// and creates the row; a validation error re-renders the form fragment (html).
+func TestD35InPageCreate(t *testing.T) {
+	a, pool, sess := d35App(t)
+	ctx := context.Background()
+	form := url.Values{
+		"name": {"Coffee"}, "transaction_class": {"expense"}, "parent_id": {""},
+		"budget": {"75"}, "budgetable": {"on"}, "icon": {""},
+	}
+	rec := d35FetchPost(t, a, sess, a.handleCategoryCreate, "/categories", 0, form)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("in-page create: HTTP %d body %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("in-page create should reply JSON, got %q", ct)
+	}
+	var id int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM category WHERE household_id=$1 AND name='Coffee'`, sess.Household).Scan(&id); err != nil {
+		t.Fatalf("category not created: %v", err)
+	}
+
+	bad := url.Values{"name": {""}, "transaction_class": {"expense"}, "parent_id": {""}, "budget": {""}, "icon": {""}}
+	rec = d35FetchPost(t, a, sess, a.handleCategoryCreate, "/categories", 0, bad)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("in-page create error: HTTP %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); strings.Contains(ct, "application/json") {
+		t.Errorf("in-page create error should re-render the form (html), not JSON")
+	}
+	if !strings.Contains(rec.Body.String(), "Name is required.") {
+		t.Errorf("in-page create error should show 'Name is required.'")
+	}
+}
+
+// TestD35InPageEdit: an in-page edit POST replies JSON ok and updates the row.
+func TestD35InPageEdit(t *testing.T) {
+	a, pool, sess := d35App(t)
+	ctx := context.Background()
+	id := d35Cat(t, pool, sess.Household, "Old", "expense", 0, "100", 0)
+	form := url.Values{
+		"name": {"NewName"}, "transaction_class": {"expense"}, "parent_id": {""},
+		"budget": {"900"}, "budgetable": {"on"}, "icon": {""},
+	}
+	rec := d35FetchPost(t, a, sess, a.handleCategoryEdit, "/categories/"+strconv.FormatInt(id, 10), id, form)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("in-page edit: HTTP %d body %s", rec.Code, rec.Body.String())
+	}
+	var name string
+	if err := pool.QueryRow(ctx, `SELECT name FROM category WHERE id=$1`, id).Scan(&name); err != nil {
+		t.Fatalf("read name: %v", err)
+	}
+	if name != "NewName" {
+		t.Errorf("edit should rename to NewName, got %q", name)
 	}
 }

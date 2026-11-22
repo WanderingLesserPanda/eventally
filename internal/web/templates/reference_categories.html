@@ -17,7 +17,10 @@
       <a class="cat-tab{{if eq . $.Class}} active{{end}}" data-class="{{.}}" role="tab" @click.prevent="switchClass('{{.}}')">{{classLabel .}}</a>
       {{end}}
     </div>
-    <a class="btn-primary" href="/categories/new">＋ Add Category</a>
+    <div class="cat-toolbar-actions">
+      <button type="button" class="btn" x-show="sortDirty()" x-cloak @click="saveSort()">Save Sort</button>
+      <a class="btn-primary" href="/categories/new" @click.prevent="openForm('new', 0, 0)">＋ Add Category</a>
+    </div>
   </div>
 
   <div class="cat-body">
@@ -27,6 +30,15 @@
     <div class="cat-div-v" aria-hidden="true"></div>
     <div class="cat-detail" id="cat-detail" role="tabpanel">
       {{template "cat_detail" .}}
+    </div>
+  </div>
+
+  <!-- D35 §G: the add/edit modal (the only overlay on the page). openForm()
+       fetches the cat_form fragment in by id; the D32 icon picker opens as a
+       second modal (accepted modal-over-modal, the form survives it closing). -->
+  <div x-show="formOpen" x-cloak class="hh-modal-backdrop" @click.self="closeForm()">
+    <div class="hh-modal cat-form-modal" role="dialog" aria-modal="true" aria-label="Category form">
+      <div id="cat-form-host"></div>
     </div>
   </div>
 </div>
@@ -41,7 +53,8 @@
 <ul class="cat-list">
   {{range .Rows}}
   <li class="cat-row{{if not .Active}} archived{{end}}{{if eq .ID $.SelectedID}} selected{{end}}"
-      data-id="{{.ID}}" @click="select({{.ID}})">
+      data-id="{{.ID}}" @click="select({{.ID}})"
+      draggable="true" @dragstart="dragStart($event,'top')" @dragover.prevent="dragOver($event)" @dragend="dragEnd($event,'top')">
     <i class="la la-grip-vertical cat-grip" title="Reorder"></i>
     <span class="cat-name">{{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</span>
     <span class="cat-count">{{.Count}}</span>
@@ -67,7 +80,7 @@
     <span class="cat-detail-name">{{$d.Cat.Name}}</span>
     {{catIcon $d.Cat.Icon}}
   </div>
-  <a class="btn-link" href="/categories/{{$d.Cat.ID}}">Edit Category</a>
+  <a class="btn-link" href="/categories/{{$d.Cat.ID}}" @click.prevent="openForm('edit', {{$d.Cat.ID}}, 0)">Edit Category</a>
 </div>
 
 <div class="cat-total">
@@ -85,24 +98,24 @@
     <td class="cat-cell-name">{{catIcon $d.Cat.Icon}} {{$d.Cat.Name}}{{if not $d.Cat.Active}} <span class="tag">archived</span>{{end}}</td>
     <td class="money">{{if $d.Cat.HasBudget}}{{money $d.Cat.Budget}}{{else}}—{{end}}</td>
     <td class="cat-op">
-      <a class="btn-link small" href="/categories/{{$d.Cat.ID}}">Edit</a>
+      <a class="btn-link small" href="/categories/{{$d.Cat.ID}}" @click.prevent="openForm('edit', {{$d.Cat.ID}}, 0)">Edit</a>
       {{if $d.Cat.Active}}<button type="button" class="btn-link small" data-name="{{$d.Cat.Name}}" @click="archiveTop($event, {{$d.Cat.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveTop({{$d.Cat.ID}})">Unarchive</button>{{end}}
-      <i class="la la-grip-vertical cat-grip" title="Reorder"></i>
     </td>
   </tr>
   {{range $d.Subs}}
-  <tr{{if not .Active}} class="archived"{{end}}>
+  <tr{{if not .Active}} class="archived"{{end}} data-child data-id="{{.ID}}"
+      draggable="true" @dragstart="dragStart($event,'sub')" @dragover.prevent="dragOver($event)" @dragend="dragEnd($event,'sub')">
     <td class="cat-cell-name">{{catIcon .Icon}} {{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</td>
     <td class="money">{{if .HasBudget}}{{money .Budget}}{{else}}—{{end}}</td>
     <td class="cat-op">
-      <a class="btn-link small" href="/categories/{{.ID}}">Edit</a>
+      <a class="btn-link small" href="/categories/{{.ID}}" @click.prevent="openForm('edit', {{.ID}}, 0)">Edit</a>
       {{if .Active}}<button type="button" class="btn-link small" data-name="{{.Name}}" @click="archiveSub($event, {{.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveSub({{.ID}})">Unarchive</button>{{end}}
       <i class="la la-grip-vertical cat-grip" title="Reorder"></i>
     </td>
   </tr>
   {{end}}
 </table>
-<a class="cat-add-sub btn-link" href="/categories/new?parent={{$d.Cat.ID}}">＋ Add Subcategory</a>
+<a class="cat-add-sub btn-link" href="/categories/new?parent={{$d.Cat.ID}}" @click.prevent="openForm('new', 0, {{$d.Cat.ID}})">＋ Add Subcategory</a>
 {{else}}
 <p class="cat-empty">Please add a category first.</p>
 {{end}}

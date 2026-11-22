@@ -247,6 +247,44 @@ func (a *App) renderCategoryForm(w http.ResponseWriter, r *http.Request, f Categ
 	})
 }
 
+// inPage reports whether the request is an in-page fetch (the modal form
+// GET/POST and the fragment swaps), so handlers return a JSON/fragment payload
+// instead of a full page or a redirect.
+func inPage(r *http.Request) bool {
+	return r.Header.Get("X-Requested-With") == "fetch"
+}
+
+// renderCategoryFormFragment renders just the cat_form define (no layout) for
+// the in-page modal (D35 §G). Session is passed so the csrf field renders.
+func (a *App) renderCategoryFormFragment(w http.ResponseWriter, r *http.Request, f CategoryForm, editing bool) {
+	a.renderFragment(w, r, http.StatusOK, "cat_form", map[string]any{
+		"Session":    sessionFromContext(r.Context()),
+		"F":          f,
+		"Classes":    categoryClasses,
+		"Editing":    editing,
+		"IconGroups": iconGroups(),
+	})
+}
+
+// renderCategoryFormError re-renders the form with its validation error: as a
+// fragment when in-page (the modal re-injects it to show the error), else as a
+// full page.
+func (a *App) renderCategoryFormError(w http.ResponseWriter, r *http.Request, f CategoryForm, editing bool) {
+	if inPage(r) {
+		a.renderCategoryFormFragment(w, r, f, editing)
+		return
+	}
+	a.renderCategoryForm(w, r, f)
+}
+
+// categoryFormOK is the in-page success reply: the modal closes and re-fetches
+// the changed panes.
+func categoryFormOK(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
 func (a *App) parseCategoryForm(r *http.Request, f CategoryForm) CategoryForm {
 	f.Name = strings.TrimSpace(r.FormValue("name"))
 	f.Class = r.FormValue("transaction_class")
@@ -317,6 +355,10 @@ func (a *App) handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		f.ParentOptions = a.categoryParentOptions(r.Context(), hh, 0)
+		if inPage(r) {
+			a.renderCategoryFormFragment(w, r, f, false)
+			return
+		}
 		a.renderCategoryForm(w, r, f)
 		return
 	}
@@ -329,7 +371,7 @@ func (a *App) handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.Err != "" {
 		f.ParentOptions = a.categoryParentOptions(r.Context(), hh, 0)
-		a.renderCategoryForm(w, r, f)
+		a.renderCategoryFormError(w, r, f, false)
 		return
 	}
 	var parentID any
@@ -352,7 +394,11 @@ func (a *App) handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.ParentOptions = a.categoryParentOptions(r.Context(), hh, 0)
-		a.renderCategoryForm(w, r, f)
+		a.renderCategoryFormError(w, r, f, false)
+		return
+	}
+	if inPage(r) {
+		categoryFormOK(w)
 		return
 	}
 	a.redirectRef(w, r, "/categories", "Category created.")
@@ -382,6 +428,10 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		f := CategoryForm{Category: cur}
 		f.ParentOptions = a.categoryParentOptions(ctx, hh, id)
+		if inPage(r) {
+			a.renderCategoryFormFragment(w, r, f, true)
+			return
+		}
 		a.renderCategoryForm(w, r, f)
 		return
 	}
@@ -397,7 +447,7 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.Err != "" {
 		f.ParentOptions = a.categoryParentOptions(ctx, hh, id)
-		a.renderCategoryForm(w, r, f)
+		a.renderCategoryFormError(w, r, f, true)
 		return
 	}
 	var parentID any
@@ -420,7 +470,11 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.ParentOptions = a.categoryParentOptions(ctx, hh, id)
-		a.renderCategoryForm(w, r, f)
+		a.renderCategoryFormError(w, r, f, true)
+		return
+	}
+	if inPage(r) {
+		categoryFormOK(w)
 		return
 	}
 	a.redirectRef(w, r, "/categories", "Category saved.")
@@ -525,4 +579,140 @@ func (a *App) handleCategoryArchive(w http.ResponseWriter, r *http.Request) {
 // handleCategoryUnarchive restores an archived category.
 func (a *App) handleCategoryUnarchive(w http.ResponseWriter, r *http.Request) {
 	a.setCatActive(w, r, true)
+}
+
+// --- D35 Save Sort (ADR-0011, §C / Q3 / Q13) --------------------------------
+// Reordering reuses category.sort_order (already the ORDER BY on budget cards
+// and the recurring-template selects, so one order is honoured everywhere).
+// The surfaces stage the order client-side as a drag preview; this endpoint is
+// the only place it persists. One POST carries the full ordered id list for a
+// class + level, and sort_order is renumbered 0..N in that order, atomically.
+// The posted ids must be exactly the set at that level — a stale or dropped
+// row would leave a gap, so a mismatch is a 400. No click = no write.
+
+// catLevelIDs lists the category ids at a reorder level: "top" = the top-level
+// categories of the class; "sub" = the children of parentID.
+func (a *App) catLevelIDs(ctx context.Context, hh int64, class, level string, parentID int64) ([]int64, error) {
+	var (
+		q    string
+		args []any
+	)
+	if level == "top" {
+		q = `SELECT id FROM category WHERE household_id=$1 AND transaction_class=$2 AND parent_id IS NULL
+			ORDER BY sort_order, name`
+		args = []any{hh, class}
+	} else {
+		q = `SELECT id FROM category WHERE household_id=$1 AND parent_id=$2
+			ORDER BY sort_order, name`
+		args = []any{hh, parentID}
+	}
+	rows, err := a.Pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// handleCategorySort commits a staged reorder: renumber sort_order 0..N over
+// the posted id list for a class + level, in a single transaction.
+func (a *App) handleCategorySort(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	hh := sessionFromContext(ctx).Household
+	class := r.PostFormValue("class")
+	level := r.PostFormValue("level")
+	if !containsStr(categoryClasses, class) {
+		http.Error(w, "bad class", 400)
+		return
+	}
+	if level != "top" && level != "sub" {
+		http.Error(w, "bad level", 400)
+		return
+	}
+	var parentID int64
+	if level == "sub" {
+		pid, err := strconv.ParseInt(strings.TrimSpace(r.PostFormValue("parent_id")), 10, 64)
+		if err != nil || pid <= 0 {
+			http.Error(w, "bad parent_id", 400)
+			return
+		}
+		parentID = pid
+		if msg := a.verifyParent(ctx, hh, parentID); msg != "" {
+			http.Error(w, msg, 400)
+			return
+		}
+	}
+	posted := parseIDList(r.PostFormValue("ids"))
+	cur, err := a.catLevelIDs(ctx, hh, class, level, parentID)
+	if err != nil {
+		http.Error(w, "list level: "+err.Error(), 500)
+		return
+	}
+	if !sameIDSet(posted, cur) {
+		http.Error(w, "the reordered list is stale, reload and try again", 400)
+		return
+	}
+	tx, err := a.Pool.Begin(ctx)
+	if err != nil {
+		http.Error(w, "begin sort: "+err.Error(), 500)
+		return
+	}
+	defer tx.Rollback(ctx)
+	for i, id := range posted {
+		if _, err := tx.Exec(ctx,
+			`UPDATE category SET sort_order=$1 WHERE id=$2 AND household_id=$3`,
+			i, id, hh); err != nil {
+			http.Error(w, "renumber: "+err.Error(), 500)
+			return
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		http.Error(w, "commit sort: "+err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// parseIDList splits a comma-separated id list into int64s (empties skipped).
+func parseIDList(csv string) []int64 {
+	var out []int64
+	for _, part := range strings.Split(csv, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if n, err := strconv.ParseInt(part, 10, 64); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// sameIDSet reports whether a and b hold the same multiset of ids (same
+// length, same membership, order-insensitive).
+func sameIDSet(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[int64]int, len(a))
+	for _, x := range a {
+		counts[x]++
+	}
+	for _, x := range b {
+		if counts[x] == 0 {
+			return false
+		}
+		counts[x]--
+	}
+	return true
 }
