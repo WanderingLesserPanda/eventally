@@ -413,15 +413,23 @@ a.hh-item { cursor: pointer; }
 .cat-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.6rem; }
 .cat-detail-title { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
 .cat-detail-title .cat-detail-name { font-weight: 700; font-size: 1.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-detail-title .la { font-size: 1.25rem; line-height: 1; }
 .cat-detail-head .btn-link { flex-shrink: 0; }
 .cat-total { margin: 0 0 0.7rem; }
 .cat-total .muted { color: #4b5563; }
 .cat-note { font-size: 0.85rem; font-style: italic; color: var(--muted); margin: 0 0 0.7rem; }
-.cat-subtable th { background: var(--band); }
-.cat-subtable .cat-cell-name .la { margin-right: 0.4rem; }
-.cat-subtable .cat-op { text-align: right; white-space: nowrap; }
-.cat-subtable th.cat-op { text-align: center; }
-.cat-subtable .cat-op .cat-grip { margin-left: 0.7rem; }
+.cat-subtable { table-layout: fixed; }
+.cat-subtable .col-name { width: 45%; }
+.cat-subtable .col-budget { width: 30%; }
+.cat-subtable .col-op { width: 25%; }
+.cat-subtable th { background: var(--band); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.cat-subtable th.money { text-align: left; }
+.cat-subtable td.money { text-align: left; }
+.cat-subtable .cat-cell-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-subtable .cat-cell-name .la { margin-right: 0.4rem; font-size: 1.15rem; line-height: 1; }
+.cat-subtable .cat-op { white-space: nowrap; }
+.cat-subtable th.cat-op { text-align: right; }
+.cat-subtable td.cat-op { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; }
 .cat-subtable tr.archived td { opacity: 0.55; }
 /* D35 drag reorder (custom pointer events): the grip is the handle, the
    dragged row becomes a hollow slot, and a floating card follows the cursor.

@@ -211,8 +211,11 @@ func catEnvelopeTotal(cat Category, subs []Category) (total money.Money, hasTota
 		// Slices exceed the parent's envelope: the excess simply auto add-ons.
 		note = fmt.Sprintf("Over-allocated by %s, the total budget for %s becomes %s.",
 			moneyNote(slice-own), cat.Name, moneyNote(total))
-	case !cat.HasBudget && sliceCount > 0:
-		// No parent budget: the slices add on, so the total is informational.
+	case !cat.HasBudget && sliceCount > 0 && standalone == 0:
+		// No parent budget and no standalone sub budgets: the slices ARE the
+		// total, so the note matches the displayed total. When standalone sub
+		// budgets exist the note's slice sum would understate the total, so
+		// the note is suppressed (user-revised 2026-11-24; supersedes §D).
 		if sliceCount == 1 {
 			note = fmt.Sprintf("No budget on %s, %s from %s adds to the total.",
 				cat.Name, moneyNote(firstSlice.Budget), firstSlice.Name)

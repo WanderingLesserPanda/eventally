@@ -717,7 +717,9 @@ func TestD35SubDragShape(t *testing.T) {
 		".is-dragging .cat-subtable a.btn-link",           // Edit dimmed while dragging
 		".is-dragging .cat-subtable button.btn-link",      // Archive dimmed while dragging
 		".drag-card-sub .dc-op a, .drag-card-sub .dc-op button", // card ops dimmed
-		".cat-subtable .cat-op { text-align: right",       // operation column hugs the right edge
+		// operation column hugs the right edge (4th-review 2026-11-24: the cell
+		// is a flex row, Edit/Archive/grip right-aligned with a 0.5rem gap).
+		".cat-subtable td.cat-op { display: flex; align-items: center; justify-content: flex-end",
 		".drag-card-sub > span",                           // card cells mirror the <td> padding
 		"box-shadow: inset 3px 0 0 0 var(--accent)",       // accent bar is an inset shadow (no layout cost)
 	} {
@@ -777,8 +779,10 @@ func TestD35ReviewRefinementsShape(t *testing.T) {
 		".cat-note { font-size: 0.85rem; font-style: italic; color: var(--muted)",
 		// (3) darker "Total Budget:" label (var(--muted) -> #4b5563).
 		".cat-total .muted { color: #4b5563",
-		// (4) centred operation header (the data cell stays right-aligned).
-		".cat-subtable th.cat-op { text-align: center",
+		// (4) right-aligned operation header, matching the right-aligned flex
+		// cell (4th-review rule 2026-11-24: header + cell share one coherent
+		// right alignment; the cell is a flex row with a 0.5rem gap).
+		".cat-subtable th.cat-op { text-align: right",
 		// (5) narrower left pane (42% -> 25%, ~3/5 of the former width).
 		".cat-pane { flex: 0 0 25%; min-width: 200px",
 		// (6) ellipsising title: the title box can shrink, the name truncates,

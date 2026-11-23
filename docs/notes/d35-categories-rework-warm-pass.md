@@ -65,6 +65,17 @@ inspired by it, not a fork.
   `+ Add Subcategory` sits
   **directly below the table** (or the dividing line, if none) — a standing
   placement rule, it is NOT a footer of the pane.
+  **Operation column alignment (4th-review revision, 2026-11-24, user-revised,
+  supersedes the 3rd-review centred header):** the Operation **header** and the
+  row **cell** use one coherent **right** alignment. The header is right-aligned
+  over the Edit / Archive / drag-grip cluster, which is a right-aligned flex row
+  with a 0.5rem gap between the two buttons and the grip. This supersedes the
+  3rd-review **centred** header, which matched neither the left-hugging
+  Edit/Archive links nor the right-pushed grip. The same 4th-review pass also
+  settles the sub-table header case/weight (normal case, non-bold, overriding the
+  global uppercase/bold `th`), the 45/30/25 column widths, the left-aligned Budget
+  column, and the detail-head + sub-row icon sizing; the shipped CSS and
+  `cat_ui_shape_b5_test.go` pin them.
 - **One full page load.** Tab switch, row switch, create/edit, archive, and
   reorder are all `fetch` + in-place DOM swap (Alpine, already on the page).
   No new libraries. The D32 icon-picker modal is the existing proof that this
@@ -148,6 +159,14 @@ silent. Wording (user-settled 2026-11-21; house style: commas, no em-dashes,
 no possessives):
 - Over-allocated: `Over-allocated by 500, the total budget for Food & Drink becomes 3,000.`
 - No parent budget: `No budget on Food & Drink, 1,500 from Groceries adds to the total.`
+
+  **Revision (4th-review, 2026-11-24, user-revised, supersedes the no-budget note
+  above):** the no-budget note now shows **only when the part-of-parent slices are
+  the entire total** — that is, the parent has no standalone sub budgets. When
+  standalone sub budgets are present, the slice sum understates the Total (which
+  is standalone + slices), so the note is **suppressed** rather than shown; it no
+  longer contradicts the number beside it. The over-allocation note (parent
+  budgeted) is unchanged.
 
 **Computed, not written back.** The effective total is **not** persisted into
 the parent's `budget_per_month`. The parent keeps the envelope the user typed;

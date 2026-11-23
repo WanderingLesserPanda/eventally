@@ -20,17 +20,37 @@
       <label>Name *
         <input type="text" name="name" value="{{.F.Name}}" required>
       </label>
+      {{if .F.ParentID}}
+      <label>Class
+        <select name="transaction_class" disabled aria-disabled="true">
+          {{range .Classes}}<option value="{{.}}" {{if eq $.F.Class .}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        <input type="hidden" name="transaction_class" value="{{.F.Class}}">
+      </label>
+      {{else}}
       <label>Class *
         <select name="transaction_class" required>
           {{range .Classes}}<option value="{{.}}" {{if eq $.F.Class .}}selected{{end}}>{{.}}</option>{{end}}
         </select>
       </label>
+      {{end}}
+      {{if .F.ParentID}}
+      {{if .Editing}}
       <label>Parent <span class="muted small">(optional, one level)</span>
         <select name="parent_id" x-model="pid">
           <option value="">— top level —</option>
           {{range .F.ParentOptions}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $.F.ParentID)}}selected{{end}}>{{.Name}}</option>{{end}}
         </select>
       </label>
+      {{else}}
+      <label>Parent
+        <select name="parent_id" disabled aria-disabled="true">
+          {{range .F.ParentOptions}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $.F.ParentID)}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+        <input type="hidden" name="parent_id" value="{{.F.ParentID}}">
+      </label>
+      {{end}}
+      {{end}}
       <label>Monthly budget <span class="muted small">(optional)</span>
         <input type="text" name="budget" value="{{if .F.HasBudget}}{{moneyPlain .F.Budget}}{{end}}" placeholder="1500">
       </label>
