@@ -158,10 +158,12 @@ func TestD35PerClassAndDefaultSelection(t *testing.T) {
 	}
 }
 
-// TestD35SubTableSelfFirstAndTotal: the detail sub-table lists the category's
-// own row first, then its subcategories in sort_order; the Batch-2 total is the
+// TestD35SubTableOrderAndTotal: the detail sub-table lists the category's
+// subcategories in sort_order (active first). The parent's own row is NOT in
+// the sub-table — the detail-pane polish made it subs-only (the parent is the
+// selected row in the left pane, not a sub-table row). The Batch-2 total is the
 // parent budget plus all sub budgets (all standalone pre-000020).
-func TestD35SubTableSelfFirstAndTotal(t *testing.T) {
+func TestD35SubTableOrderAndTotal(t *testing.T) {
 	a, pool, sess := d35App(t)
 	food := d35Cat(t, pool, sess.Household, "Food", "expense", 0, "1000", 0)
 	d35Cat(t, pool, sess.Household, "Groceries", "expense", food, "1500", 1)
@@ -173,11 +175,12 @@ func TestD35SubTableSelfFirstAndTotal(t *testing.T) {
 		t.Fatalf("detail sub-table not rendered: %s", body)
 	}
 	det := body[iSub:]
-	iSelf := strings.Index(det, "Food")
+	// Subs-only, in sort_order: Dining Out (sort 0) precedes Groceries (sort 1).
+	// The parent (Food) is not a sub-table row.
 	iDining := strings.Index(det, "Dining Out")
 	iGroceries := strings.Index(det, "Groceries")
-	if !(iSelf >= 0 && iSelf < iDining && iDining < iGroceries) {
-		t.Fatalf("sub-table order: self=%d dining=%d groceries=%d (want self < dining < groceries)", iSelf, iDining, iGroceries)
+	if !(iDining >= 0 && iDining < iGroceries) {
+		t.Fatalf("sub-table order: dining=%d groceries=%d (want dining < groceries)", iDining, iGroceries)
 	}
 	if !strings.Contains(body, "3,000.00") {
 		t.Errorf("expected Batch-2 total 3,000.00 (1000 + 500 + 1500)")
@@ -646,5 +649,36 @@ func TestD35FormBudgetModePrefill(t *testing.T) {
 	// A top-level category does NOT (it has no parent envelope).
 	if strings.Contains(editForm(parent), checked) {
 		t.Errorf("top-level form should NOT pre-fill the checkbox checked")
+	}
+}
+
+// TestD35DragSortCSRFShape: the in-page Save Sort / archive / unarchive POSTs
+// reach the handler only if (a) the .cats element renders data-csrf with the
+// session token, and (b) the catsPage Alpine component uses the init()
+// lifecycle hook. The detail-pane polish shipped the hook named $init, which
+// Alpine 3 never calls (it calls the data object's init()), so this.csrf
+// stayed empty and every in-page POST 403'd on the CSRF check. This pins both
+// halves so the misnaming cannot silently return.
+func TestD35DragSortCSRFShape(t *testing.T) {
+	a, _, sess := d35App(t)
+	// Built by concatenation so it stays an unremarkable constant: a single
+	// bare literal in a "CSRFToken = ..." assignment reads like a credential
+	// and gets mangled in tooling output. The exact value is irrelevant to the
+	// shape test — only that it is non-empty and echoed back into data-csrf.
+	want := "d35shape" + "abc123"
+	sess.CSRFToken = want
+	html := d35Page(t, a, sess, "?class=expense")
+	// (a) The .cats element carries the session token in data-csrf, so the
+	// component can read it and stamp it on every in-page POST.
+	if !strings.Contains(html, `data-csrf="`+want+`"`) {
+		t.Fatalf("rendered categories page missing data-csrf with the session token")
+	}
+	// (b) The catsPage component must define init() (Alpine 3's per-component
+	// hook); the dead $init would leave this.csrf empty and 403 the sort.
+	if strings.Contains(html, "$init") {
+		t.Fatalf("catsPage still uses the dead $init hook (Alpine 3 calls init(), not $init)")
+	}
+	if !strings.Contains(html, "init() {") {
+		t.Fatalf("catsPage missing the init() lifecycle hook")
 	}
 }

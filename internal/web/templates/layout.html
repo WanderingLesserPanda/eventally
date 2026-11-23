@@ -59,7 +59,9 @@ document.addEventListener('alpine:init', () => {
     // server orders captured on pane load, so a no-op drag is not "dirty".
     topOrder: null, subOrder: null, topClean: [], subClean: [],
     dragEl: null, dragSurface: null,
-    $init() {
+    init() {
+      // Alpine 3 lifecycle hook is init(), not $init() (the vendored Alpine
+      // calls the data object's init() after binding; $init is dead code).
       // The Categories page has one catsPage instance with unique pane ids.
       // Look elements up by id against the document: in Alpine event-handler
       // context this.$el is the triggering element, not the x-data root.
