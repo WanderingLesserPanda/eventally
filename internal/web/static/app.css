@@ -442,6 +442,21 @@ a.hh-item { cursor: pointer; }
   will-change: transform;
 }
 .drag-card .la { font-size: 1rem; color: var(--accent); }
+/* Subcategory drag: the card is the WHOLE row (name / budget / operation),
+   laid out to match the sub-table columns. The name fills, the budget and the
+   operation sit to the right, and the operation actions are dimmed so the
+   lifted card never reads as still having live links (they are inert). */
+.drag-card-sub .dc-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drag-card-sub .dc-money { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.drag-card-sub .dc-op { white-space: nowrap; }
+.drag-card-sub .dc-op a, .drag-card-sub .dc-op button { opacity: 0.45; }
+/* While a drag is live, Edit/Archive on every sub-table row are inert (dimmed
+   + non-clickable) so a mid-drag tap cannot fire a navigation. The drag card
+   mirrors this dimming (see .drag-card-sub above). */
+.is-dragging .cat-subtable a.btn-link, .is-dragging .cat-subtable button.btn-link {
+  opacity: 0.45;
+  pointer-events: none;
+}
 /* Screen-reader-only live region announcing a reorder's new position. */
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;

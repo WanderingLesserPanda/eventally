@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -680,5 +681,43 @@ func TestD35DragSortCSRFShape(t *testing.T) {
 	}
 	if !strings.Contains(html, "init() {") {
 		t.Fatalf("catsPage missing the init() lifecycle hook")
+	}
+}
+
+// TestD35SubDragShape: the subcategory drag refinements (full-row card,
+// table containment, FLIP shift, and Edit/Archive dimming) are pure
+// client-side JS/CSS that the Go test env cannot execute. Pin their shape so
+// the behaviour cannot silently regress: the sub drag card mirrors the whole
+// row (name / budget / operation), is clamped to the sub-table bounds, animates
+// the sub rows' <td> cells (a CSS transform on a <tr> is unreliable), and the
+// Edit/Archive links dim (disable) on every row while a drag is live.
+func TestD35SubDragShape(t *testing.T) {
+	a, _, sess := d35App(t)
+	html := d35Page(t, a, sess, "?class=expense")
+	for _, want := range []string{
+		"drag-card-sub",       // the sub drag card is the full-row variant
+		"dc-name",             // card mirrors the name cell
+		"dc-money",            // card mirrors the budget cell
+		"dc-op",               // card mirrors the operation cell
+		"el.tagName === 'TR'", // FLIP animates the <td> cells for sub rows
+		"closest('table')",    // placeCard clamps the card to the table bounds
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("sub-drag shape missing %q", want)
+		}
+	}
+	// The dimming rule lives in the served stylesheet, not the rendered page.
+	css, err := os.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
+	}
+	for _, want := range []string{
+		".is-dragging .cat-subtable a.btn-link",         // Edit dimmed while dragging
+		".is-dragging .cat-subtable button.btn-link",    // Archive dimmed while dragging
+		".drag-card-sub .dc-op a, .drag-card-sub .dc-op button", // card ops dimmed
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("app.css sub-drag dimming missing %q", want)
+		}
 	}
 }

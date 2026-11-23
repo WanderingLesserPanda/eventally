@@ -186,9 +186,10 @@ document.addEventListener('alpine:init', () => {
         top ? el.classList.contains('cat-row') : el.hasAttribute('data-child'));
     },
     flipSnap() {
-      // First: capture row offsets so a reorder animates (top pane only; a CSS
-      // transform on a <tr> is unreliable, so sub-table rows jump instead).
-      if (this.dragSurface !== 'top') { this._flipBefore = null; return; }
+      // Capture row offsets so a reorder animates (FLIP) for both panes. The
+      // offset read works the same for the <li> rows and the <tr> rows; the
+      // transform is applied per-surface in flipApply (a CSS transform on a <tr>
+      // is unreliable, so sub rows animate their <td> cells instead).
       this._flipBefore = this.sibs(this.dragRow).map(el => [el, el.getBoundingClientRect().top]);
     },
     flipApply() {
@@ -197,11 +198,17 @@ document.addEventListener('alpine:init', () => {
       before.forEach(([el, top]) => {
         const dy = top - el.getBoundingClientRect().top;
         if (!dy) return;
-        el.style.transition = 'none';
-        el.style.transform = 'translateY(' + dy + 'px)';
-        void el.offsetHeight; // force reflow so the next frame transitions
-        el.style.transition = 'transform 130ms ease';
-        el.style.transform = '';
+        // A CSS transform on a <tr> is unreliable across browsers; for the
+        // sub-table, translate each <td> instead (same dy, same visual shift).
+        // Top-pane <li> rows transform the row itself.
+        const targets = el.tagName === 'TR' ? Array.from(el.children) : [el];
+        targets.forEach(td => {
+          td.style.transition = 'none';
+          td.style.transform = 'translateY(' + dy + 'px)';
+          void td.offsetHeight; // force reflow so the next frame transitions
+          td.style.transition = 'transform 130ms ease';
+          td.style.transform = '';
+        });
       });
     },
     placeBefore(row, ref) {
@@ -279,12 +286,30 @@ document.addEventListener('alpine:init', () => {
     liftDrag() {
       this.dragMoved = true;
       const row = this.dragRow;
+      const sub = this.dragSurface === 'sub';
       const card = this.dragCard = document.createElement('div');
-      card.className = 'drag-card';
-      const icon = row.querySelector('.cat-cell-name .la');
-      card.innerHTML = (icon ? icon.outerHTML : '<i class="la la-tag"></i>') +
-        '<span class="drag-card-name"></span>';
-      card.querySelector('.drag-card-name').textContent = row.dataset.name || '';
+      card.className = 'drag-card' + (sub ? ' drag-card-sub' : '');
+      if (sub) {
+        // Full-row card: mirror the sub-table's three cells (name / budget /
+        // operation) so the lifted card reads as the whole row, not just the
+        // name. The operation actions render dimmed (disabled) via the
+        // .drag-card-sub CSS; the cloned <a>/<button>/<i> carry no Alpine
+        // listeners (detached nodes), and .drag-card has pointer-events:none,
+        // so nothing in the card is interactive.
+        const cell = sel => { const el = row.querySelector(sel); return el ? el.innerHTML : ''; };
+        card.innerHTML =
+          '<span class="dc-name"></span><span class="dc-money"></span><span class="dc-op"></span>';
+        card.querySelector('.dc-name').innerHTML = cell('.cat-cell-name');
+        card.querySelector('.dc-money').innerHTML = cell('td.money');
+        card.querySelector('.dc-op').innerHTML = cell('td.cat-op');
+        const w = row.getBoundingClientRect().width;
+        if (w) card.style.width = w + 'px';
+      } else {
+        const icon = row.querySelector('.cat-cell-name .la');
+        card.innerHTML = (icon ? icon.outerHTML : '<i class="la la-tag"></i>') +
+          '<span class="drag-card-name"></span>';
+        card.querySelector('.drag-card-name').textContent = row.dataset.name || '';
+      }
       document.body.appendChild(card);
       this.dragCardH = row.getBoundingClientRect().height;
       this.placeCard(this.dragEvt);
@@ -294,6 +319,20 @@ document.addEventListener('alpine:init', () => {
     placeCard(evt) {
       const c = this.dragCard;
       if (!c) return;
+      if (this.dragSurface === 'sub') {
+        // Contain the card in the sub-table: pin it to the table's left edge
+        // (a full-width row does not slide sideways) and clamp its top edge to
+        // the table's top/bottom, so the cursor moving past the table (up, down,
+        // or sideways) never pulls the card out of it.
+        const t = this.dragRow.closest('table');
+        if (t) {
+          const r = t.getBoundingClientRect();
+          const h = this.dragCardH || 32;
+          const y = Math.max(r.top, Math.min(evt.clientY - h / 2, r.bottom - h));
+          c.style.transform = 'translate3d(' + r.left + 'px,' + y + 'px,0)';
+          return;
+        }
+      }
       c.style.transform = 'translate3d(' + (evt.clientX + 6) + 'px,' +
         (evt.clientY - (this.dragCardH || 32) / 2) + 'px,0)';
     },
