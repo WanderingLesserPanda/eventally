@@ -4,6 +4,7 @@
      fetch swaps (the catsPage Alpine component in layout.html). Create / edit
      are full-page links in this batch — the modal form lands in Batch 3. -->
 <div class="cats" x-data="catsPage()" data-class="{{.Class}}" data-csrf="{{if .Session}}{{.Session.CSRFToken}}{{end}}">
+  <div id="cat-sort-live" class="sr-only" aria-live="polite"></div>
   <div class="cat-head">
     <div>
       <h1>Categories</h1>
@@ -53,9 +54,9 @@
 <ul class="cat-list">
   {{range .Rows}}
   <li class="cat-row{{if not .Active}} archived{{end}}{{if eq .ID $.SelectedID}} selected{{end}}"
-      data-id="{{.ID}}" @click="select({{.ID}})"
-      draggable="true" @dragstart="dragStart($event,'top')" @dragover.prevent="dragOver($event)" @dragend="dragEnd($event,'top')">
-    <i class="la la-braille cat-grip" title="Reorder"></i>
+      data-id="{{.ID}}" data-name="{{.Name}}" @click="select({{.ID}})">
+    <i class="la la-braille cat-grip" title="Reorder" tabindex="0" role="button"
+       aria-roledescription="Reorder" @pointerdown="gripDown($event)" @keydown="gripKey($event)"></i>
     <span class="cat-name">{{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</span>
     <span class="cat-count">{{.Count}}</span>
   </li>
@@ -97,14 +98,14 @@
   </tr>
   {{if $d.Subs}}
   {{range $d.Subs}}
-  <tr{{if not .Active}} class="archived"{{end}} data-child data-id="{{.ID}}"
-      draggable="true" @dragstart="dragStart($event,'sub')" @dragover.prevent="dragOver($event)" @dragend="dragEnd($event,'sub')">
+  <tr{{if not .Active}} class="archived"{{end}} data-child data-id="{{.ID}}" data-name="{{.Name}}">
     <td class="cat-cell-name">{{catIcon .Icon}} {{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</td>
     <td class="money">{{if .HasBudget}}{{money .Budget}}{{if eq .BudgetMode "part_of_parent"}} <span class="muted small">(of parent)</span>{{end}}{{else}}—{{end}}</td>
     <td class="cat-op">
       <a class="btn-link small" href="/categories/{{.ID}}" @click.prevent="openForm('edit', {{.ID}}, 0)">Edit</a>
       {{if .Active}}<button type="button" class="btn-link small" data-name="{{.Name}}" @click="archiveSub($event, {{.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveSub({{.ID}})">Unarchive</button>{{end}}
-      <i class="la la-braille cat-grip" title="Reorder"></i>
+      <i class="la la-braille cat-grip" title="Reorder" tabindex="0" role="button"
+         aria-roledescription="Reorder" @pointerdown="gripDown($event)" @keydown="gripKey($event)"></i>
     </td>
   </tr>
   {{end}}

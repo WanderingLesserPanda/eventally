@@ -58,7 +58,10 @@ document.addEventListener('alpine:init', () => {
     // the current (dragged) order; null = clean. topClean/subClean are the
     // server orders captured on pane load, so a no-op drag is not "dirty".
     topOrder: null, subOrder: null, topClean: [], subClean: [],
-    dragEl: null, dragSurface: null,
+    dragRow: null, dragSurface: null, dragCard: null, dragGrip: null,
+    dragPointerId: null, dragMoved: false, dragStartX: 0, dragStartY: 0,
+    dragEvt: null, dragRaf: null, dragCardH: 0, dragOrigNext: null,
+    dragOrigParent: null, _flipBefore: null, _winMove: null, _winUp: null, _winCancel: null,
     init() {
       // Alpine 3 lifecycle hook is init(), not $init() (the vendored Alpine
       // calls the data object's init() after binding; $init is dead code).
@@ -166,33 +169,192 @@ document.addEventListener('alpine:init', () => {
     leftIDs() { return Array.from(document.querySelectorAll('#cat-pane .cat-row')).map(r => r.dataset.id); },
     subIDs() { return Array.from(document.querySelectorAll('#cat-detail tr[data-child]')).map(r => r.dataset.id); },
     sortDirty() { return !!(this.topOrder || this.subOrder); },
-    dragStart(evt, surface) {
-      this.dragEl = evt.target.closest('li, tr');
-      if (this.dragEl) this.dragEl.classList.add('dragging');
-      this.dragSurface = surface;
-      try { evt.dataTransfer.effectAllowed = 'move'; evt.dataTransfer.setData('text/plain', ''); } catch (e) { /* Safari */ }
+    // --- D35 drag reorder: custom pointer events, no library (D35 §C) ---
+    // The grip (.cat-grip) is the drag handle; touch-action:none on it makes a
+    // touch on the grip a pure drag (a touch anywhere else still scrolls the
+    // page). pointerdown captures the pointer; a 5px move lifts a floating card
+    // (the Option B "grabbed row"); the hollow slot row reorders among its
+    // siblings as the card follows the cursor; release settles the card into
+    // the slot and STAGES the order for the unchanged "Save Sort" commit.
+    // pointercancel reverts; arrow keys on the focused grip reorder for
+    // keyboard/tap users (announced via the #cat-sort-live region).
+    sibs(row) {
+      // A row plus its draggable siblings in current DOM order (top: the
+      // li.cat-rows in the <ul>; sub: the tr[data-child] rows, header excluded).
+      const top = row.classList.contains('cat-row');
+      return Array.from(row.parentElement.children).filter(el =>
+        top ? el.classList.contains('cat-row') : el.hasAttribute('data-child'));
     },
-    // Live preview: move the dragged row before/after the row under the cursor.
-    dragOver(evt) {
-      if (!this.dragEl) return;
-      const over = this.dragSurface === 'top'
-        ? evt.target.closest('#cat-pane .cat-row')
-        : evt.target.closest('#cat-detail tr[data-child]');
-      if (!over || over === this.dragEl) return;
-      const rect = over.getBoundingClientRect();
-      const before = (evt.clientY - rect.top) < rect.height / 2;
-      const parent = this.dragEl.parentNode;
-      if (before) parent.insertBefore(this.dragEl, over);
-      else if (over.nextSibling) parent.insertBefore(this.dragEl, over.nextSibling);
-      else parent.appendChild(this.dragEl);
+    flipSnap() {
+      // First: capture row offsets so a reorder animates (top pane only; a CSS
+      // transform on a <tr> is unreliable, so sub-table rows jump instead).
+      if (this.dragSurface !== 'top') { this._flipBefore = null; return; }
+      this._flipBefore = this.sibs(this.dragRow).map(el => [el, el.getBoundingClientRect().top]);
     },
-    dragEnd(evt, surface) {
-      if (this.dragEl) this.dragEl.classList.remove('dragging');
-      const order = (surface === 'top') ? this.leftIDs() : this.subIDs();
-      const clean = (surface === 'top') ? this.topClean : this.subClean;
-      if (surface === 'top') this.topOrder = arrEq(order, clean) ? null : order;
+    flipApply() {
+      const before = this._flipBefore; this._flipBefore = null;
+      if (!before) return;
+      before.forEach(([el, top]) => {
+        const dy = top - el.getBoundingClientRect().top;
+        if (!dy) return;
+        el.style.transition = 'none';
+        el.style.transform = 'translateY(' + dy + 'px)';
+        void el.offsetHeight; // force reflow so the next frame transitions
+        el.style.transition = 'transform 130ms ease';
+        el.style.transform = '';
+      });
+    },
+    placeBefore(row, ref) {
+      // Move row before `ref` (or to the end when ref is null). Flips on top.
+      if (ref === row) return;
+      const cont = row.parentElement;
+      this.flipSnap();
+      row.remove();
+      if (ref && ref.isConnected) cont.insertBefore(row, ref);
+      else cont.appendChild(row);
+      this.flipApply();
+    },
+    stageFromDOM(row) {
+      // Staged commit (§C): read the new DOM order; mark the level dirty only
+      // when it differs from the server order captured on pane load.
+      const top = row.classList.contains('cat-row');
+      const order = top ? this.leftIDs() : this.subIDs();
+      const clean = top ? this.topClean : this.subClean;
+      if (top) this.topOrder = arrEq(order, clean) ? null : order;
       else this.subOrder = arrEq(order, clean) ? null : order;
-      this.dragEl = null; this.dragSurface = null;
+    },
+    announce(row) {
+      const live = document.getElementById('cat-sort-live');
+      if (!live) return;
+      const sibs = this.sibs(row);
+      live.textContent = (row.dataset.name || '') + ' moved to position ' +
+        (sibs.indexOf(row) + 1) + ' of ' + sibs.length;
+    },
+    gripDown(evt) {
+      if (this.dragRow || !evt.isPrimary) return;
+      if (evt.pointerType === 'mouse' && evt.button !== 0) return;
+      const grip = evt.target.closest('.cat-grip');
+      const row = grip ? (grip.closest('li.cat-row') || grip.closest('tr[data-child]')) : null;
+      if (!row) return;
+      this.dragRow = row;
+      this.dragGrip = grip;
+      this.dragSurface = row.classList.contains('cat-row') ? 'top' : 'sub';
+      this.dragPointerId = evt.pointerId;
+      this.dragMoved = false;
+      this.dragStartX = evt.clientX;
+      this.dragStartY = evt.clientY;
+      this.dragOrigNext = row.nextSibling;
+      this.dragOrigParent = row.parentElement;
+      // Follow the pointer from window, not the grip: reordering a row removes
+      // its grip from the DOM mid-drag, so a grip-bound handler (or pointer
+      // capture) is lost the instant the row moves. Window listeners survive.
+      this._winMove = e => this.gripMove(e);
+      this._winUp = e => this.gripUp(e);
+      this._winCancel = e => this.gripCancel(e);
+      window.addEventListener('pointermove', this._winMove, { passive: true });
+      window.addEventListener('pointerup', this._winUp);
+      window.addEventListener('pointercancel', this._winCancel);
+    },
+    gripMove(evt) {
+      if (!this.dragRow || evt.pointerId !== this.dragPointerId) return;
+      this.dragEvt = evt;
+      if (!this.dragMoved) {
+        const dx = evt.clientX - this.dragStartX, dy = evt.clientY - this.dragStartY;
+        if (dx * dx + dy * dy < 25) return; // under 5px: a tap, not a drag
+        this.liftDrag();
+      }
+      if (this.dragRaf) return;
+      this.dragRaf = requestAnimationFrame(() => {
+        this.dragRaf = null;
+        const e = this.dragEvt, row = this.dragRow;
+        this.placeCard(e);
+        let ref = null;
+        for (const o of this.sibs(row).filter(x => x !== row)) {
+          const rc = o.getBoundingClientRect();
+          if (e.clientY < rc.top + rc.height / 2) { ref = o; break; }
+        }
+        this.placeBefore(row, ref);
+      });
+    },
+    liftDrag() {
+      this.dragMoved = true;
+      const row = this.dragRow;
+      const card = this.dragCard = document.createElement('div');
+      card.className = 'drag-card';
+      const icon = row.querySelector('.cat-cell-name .la');
+      card.innerHTML = (icon ? icon.outerHTML : '<i class="la la-tag"></i>') +
+        '<span class="drag-card-name"></span>';
+      card.querySelector('.drag-card-name').textContent = row.dataset.name || '';
+      document.body.appendChild(card);
+      this.dragCardH = row.getBoundingClientRect().height;
+      this.placeCard(this.dragEvt);
+      row.classList.add('drag-slot');
+      document.body.classList.add('is-dragging');
+    },
+    placeCard(evt) {
+      const c = this.dragCard;
+      if (!c) return;
+      c.style.transform = 'translate3d(' + (evt.clientX + 6) + 'px,' +
+        (evt.clientY - (this.dragCardH || 32) / 2) + 'px,0)';
+    },
+    gripUp(evt) {
+      if (!this.dragRow || evt.pointerId !== this.dragPointerId) return;
+      const row = this.dragRow, card = this.dragCard, moved = this.dragMoved;
+      this.clearDrag();
+      if (!moved) return; // a tap: the row's @click handles the select
+      // FLIP-settle: drop the card onto the slot, fade, then remove it.
+      const r = row.getBoundingClientRect();
+      card.style.transition = 'transform 130ms ease, opacity 130ms ease';
+      card.style.transform = 'translate3d(' + r.left + 'px,' + r.top + 'px,0)';
+      card.style.opacity = '0';
+      setTimeout(() => card.remove(), 140);
+      this.stageFromDOM(row);
+      this.announce(row);
+    },
+    gripCancel(evt) {
+      if (!this.dragRow || evt.pointerId !== this.dragPointerId) return;
+      const row = this.dragRow, card = this.dragCard, moved = this.dragMoved;
+      const origParent = this.dragOrigParent, origNext = this.dragOrigNext;
+      this.clearDrag();
+      if (moved) { // a scroll or system gesture interrupted the drag: revert it
+        if (origParent && row.isConnected) origParent.insertBefore(row, origNext);
+        if (card) card.remove();
+      }
+    },
+    gripKey(evt) {
+      if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(evt.key)) return;
+      const row = evt.target.closest('li.cat-row') || evt.target.closest('tr[data-child]');
+      if (!row) return;
+      const sibs = this.sibs(row);
+      const i = sibs.indexOf(row);
+      let t = i;
+      if (evt.key === 'ArrowUp') t = i - 1;
+      else if (evt.key === 'ArrowDown') t = i + 1;
+      else if (evt.key === 'Home') t = 0;
+      else if (evt.key === 'End') t = sibs.length - 1;
+      t = Math.max(0, Math.min(t, sibs.length - 1));
+      if (t === i) { evt.preventDefault(); return; }
+      evt.preventDefault();
+      const cont = row.parentElement;
+      const ref = sibs.filter(x => x !== row)[t];
+      row.remove();
+      if (ref && ref.isConnected) cont.insertBefore(row, ref);
+      else cont.appendChild(row);
+      this.stageFromDOM(row);
+      this.announce(row);
+    },
+    clearDrag() {
+      if (this.dragRaf) { cancelAnimationFrame(this.dragRaf); this.dragRaf = null; }
+      window.removeEventListener('pointermove', this._winMove);
+      window.removeEventListener('pointerup', this._winUp);
+      window.removeEventListener('pointercancel', this._winCancel);
+      const row = this.dragRow;
+      if (row) row.classList.remove('drag-slot');
+      document.body.classList.remove('is-dragging');
+      this.dragRow = null; this.dragSurface = null; this.dragCard = null;
+      this.dragGrip = null; this.dragPointerId = null; this.dragMoved = false;
+      this.dragEvt = null; this.dragCardH = 0; this.dragOrigNext = null;
+      this.dragOrigParent = null; this._flipBefore = null;
     },
     // One POST per dirty level (top-level of the active class, and the selected
     // category's children); each renumbers sort_order 0..N. Then re-confirm.

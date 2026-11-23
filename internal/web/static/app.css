@@ -402,7 +402,7 @@ a.hh-item { cursor: pointer; }
   border-radius: 8px; cursor: pointer; border-left: 3px solid transparent;
 }
 .cat-row + .cat-row { margin-top: 0.15rem; }
-.cat-grip { color: var(--accent); opacity: 1; font-size: 1rem; }
+.cat-grip { color: var(--accent); opacity: 1; font-size: 1rem; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
 .cat-row .cat-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cat-row .cat-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .cat-row:hover { background: var(--bg); }
@@ -419,11 +419,34 @@ a.hh-item { cursor: pointer; }
 .cat-subtable .cat-op { white-space: nowrap; }
 .cat-subtable .cat-op .cat-grip { margin-left: 0.7rem; }
 .cat-subtable tr.archived td { opacity: 0.55; }
-/* Drag-reorder highlight: the specific row being dragged, on both surfaces.
-   House-style cream tint + left accent bar, matching the selected row. */
-.cat-row.dragging { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
-.cat-subtable tr.dragging td { background: var(--sel); }
-.cat-subtable tr.dragging td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+/* D35 drag reorder (custom pointer events): the grip is the handle, the
+   dragged row becomes a hollow slot, and a floating card follows the cursor.
+   touch-action:none on the grip makes a touch on it a pure drag (a touch
+   elsewhere still scrolls); while dragging the cursor reads as grabbing. */
+.is-dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.is-dragging .cat-row, .is-dragging .cat-grip { cursor: grabbing; }
+.cat-row.drag-slot {
+  background: transparent; border-left-color: transparent; opacity: 0.5;
+  box-shadow: inset 0 0 0 1.5px var(--line);
+}
+.cat-subtable tr.drag-slot td { background: transparent; }
+.cat-subtable tr.drag-slot td:first-child { box-shadow: inset 0 0 0 1.5px var(--line); opacity: 0.5; }
+/* The floating card (Option B): white, shadowed, accent left bar, icon + name.
+   JS positions it via transform; pointer-events off so it never blocks a drop. */
+.drag-card {
+  position: fixed; left: 0; top: 0; z-index: 60; pointer-events: none;
+  display: flex; align-items: center; gap: 0.5rem;
+  background: var(--card); color: var(--ink); font-weight: 600;
+  border-left: 3px solid var(--accent); border-radius: 8px;
+  padding: 0.5rem 0.6rem; box-shadow: 0 8px 24px rgba(28, 36, 48, 0.22);
+  will-change: transform;
+}
+.drag-card .la { font-size: 1rem; color: var(--accent); }
+/* Screen-reader-only live region announcing a reorder's new position. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 /* Edit-modal archive control (top-level categories): a quiet destructive action
    set off from the Save/Cancel actions. */
 .cat-form-archive { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--line); }
