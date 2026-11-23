@@ -416,7 +416,7 @@ a.hh-item { cursor: pointer; }
 .cat-total { margin: 0 0 0.7rem; }
 .cat-subtable th { background: var(--band); }
 .cat-subtable .cat-cell-name .la { margin-right: 0.4rem; }
-.cat-subtable .cat-op { white-space: nowrap; }
+.cat-subtable .cat-op { text-align: right; white-space: nowrap; }
 .cat-subtable .cat-op .cat-grip { margin-left: 0.7rem; }
 .cat-subtable tr.archived td { opacity: 0.55; }
 /* D35 drag reorder (custom pointer events): the grip is the handle, the
@@ -446,10 +446,30 @@ a.hh-item { cursor: pointer; }
    laid out to match the sub-table columns. The name fills, the budget and the
    operation sit to the right, and the operation actions are dimmed so the
    lifted card never reads as still having live links (they are inert). */
-.drag-card-sub .dc-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.drag-card-sub .dc-money { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.drag-card-sub .dc-op { white-space: nowrap; }
+/* Sub-card column alignment: the card mirrors the sub-table row exactly. The
+ * container drops the base padding and accent border (they would push the cells
+ * off the table's column lines); each cell then carries the same padding as a
+ * <td> and is given the measured table column width inline by liftDrag(), so the
+ * budget and operation columns line up with the rows beneath. The accent left
+ * bar is an inset shadow (no layout cost) so the name cell stays aligned too. */
+.drag-card-sub {
+  gap: 0;
+  padding: 0;
+  border-left: none;
+  box-shadow: inset 3px 0 0 0 var(--accent), 0 8px 24px rgba(28, 36, 48, 0.22);
+}
+.drag-card-sub > span { padding: 0.5rem 0.6rem; box-sizing: border-box; white-space: nowrap; }
+.drag-card-sub .dc-name { flex: 0 0 auto; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.drag-card-sub .dc-money { flex: 0 0 auto; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.drag-card-sub .dc-op { flex: 0 0 auto; text-align: right; }
 .drag-card-sub .dc-op a, .drag-card-sub .dc-op button { opacity: 0.45; }
+.drag-card-sub .dc-op .cat-grip { opacity: 1; }
+/* Top-level (left pane) full-row card: the card reuses the .cat-row flex layout
+ * (gap + padding from .drag-card match .cat-row), so the cloned grip + name +
+ * count line up with the list rows beneath. The name/count cell rules are
+ * re-scoped here because the .cat-row-* selectors do not match the card. */
+.drag-card-top .cat-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drag-card-top .cat-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 /* While a drag is live, Edit/Archive on every sub-table row are inert (dimmed
    + non-clickable) so a mid-drag tap cannot fire a navigation. The drag card
    mirrors this dimming (see .drag-card-sub above). */

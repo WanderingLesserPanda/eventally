@@ -304,11 +304,28 @@ document.addEventListener('alpine:init', () => {
         card.querySelector('.dc-op').innerHTML = cell('td.cat-op');
         const w = row.getBoundingClientRect().width;
         if (w) card.style.width = w + 'px';
+        // Give each card cell the measured table column width (the row's own
+        // <td> widths) so the budget and operation columns line up exactly with
+        // the rows beneath, instead of flex-sizing to their content.
+        const tds = row.querySelectorAll('td');
+        const cells = card.children;
+        if (tds.length === cells.length) {
+          for (let k = 0; k < tds.length; k++) {
+            const cw = tds[k].getBoundingClientRect().width;
+            if (cw) cells[k].style.width = cw + 'px';
+          }
+        }
       } else {
-        const icon = row.querySelector('.cat-cell-name .la');
-        card.innerHTML = (icon ? icon.outerHTML : '<i class="la la-tag"></i>') +
-          '<span class="drag-card-name"></span>';
-        card.querySelector('.drag-card-name').textContent = row.dataset.name || '';
+        // Top-level (left pane) full-row card: mirror the whole row (grip + name
+        // + count) so the lifted card reads as the row, not just the name. It
+        // reuses the .cat-row flex layout (gap + padding from .drag-card match
+        // .cat-row), so the name and count line up with the list rows beneath.
+        // The cloned <i>/<span> carry no Alpine listeners (detached nodes) and
+        // .drag-card is pointer-events:none, so nothing in the card is live.
+        card.className = 'drag-card drag-card-top';
+        card.innerHTML = row.innerHTML;
+        const w = row.getBoundingClientRect().width;
+        if (w) card.style.width = w + 'px';
       }
       document.body.appendChild(card);
       this.dragCardH = row.getBoundingClientRect().height;
@@ -320,13 +337,31 @@ document.addEventListener('alpine:init', () => {
       const c = this.dragCard;
       if (!c) return;
       if (this.dragSurface === 'sub') {
-        // Contain the card in the sub-table: pin it to the table's left edge
-        // (a full-width row does not slide sideways) and clamp its top edge to
-        // the table's top/bottom, so the cursor moving past the table (up, down,
-        // or sideways) never pulls the card out of it.
+        // Contain the card in the sub-table's DATA rows: pin it to the table's
+        // left edge (a full-width row does not slide sideways) and clamp its top
+        // edge to the first data row's top (never into the column header above)
+        // and to the table's bottom, so the cursor moving past the table never
+        // pulls the card above the header or below the last row.
         const t = this.dragRow.closest('table');
         if (t) {
           const r = t.getBoundingClientRect();
+          const first = t.querySelector('tr[data-child]');
+          const top = first ? first.getBoundingClientRect().top : r.top;
+          const h = this.dragCardH || 32;
+          const y = Math.max(top, Math.min(evt.clientY - h / 2, r.bottom - h));
+          c.style.transform = 'translate3d(' + r.left + 'px,' + y + 'px,0)';
+          return;
+        }
+      }
+      if (this.dragSurface === 'top') {
+        // Contain the top-level card in the category list, mirroring the sub
+        // card's containment: pin it to the list's left edge (a full-width row
+        // does not slide sideways) and clamp vertically to the list's bounds, so
+        // the full-row card stays aligned with the list and the cursor moving
+        // past it never pulls the card above the first row or below the last.
+        const list = this.dragRow.closest('.cat-list') || this.dragRow.closest('#cat-pane');
+        if (list) {
+          const r = list.getBoundingClientRect();
           const h = this.dragCardH || 32;
           const y = Math.max(r.top, Math.min(evt.clientY - h / 2, r.bottom - h));
           c.style.transform = 'translate3d(' + r.left + 'px,' + y + 'px,0)';

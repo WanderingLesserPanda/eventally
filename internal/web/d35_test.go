@@ -695,12 +695,14 @@ func TestD35SubDragShape(t *testing.T) {
 	a, _, sess := d35App(t)
 	html := d35Page(t, a, sess, "?class=expense")
 	for _, want := range []string{
-		"drag-card-sub",       // the sub drag card is the full-row variant
-		"dc-name",             // card mirrors the name cell
-		"dc-money",            // card mirrors the budget cell
-		"dc-op",               // card mirrors the operation cell
-		"el.tagName === 'TR'", // FLIP animates the <td> cells for sub rows
-		"closest('table')",    // placeCard clamps the card to the table bounds
+		"drag-card-sub",                        // the sub drag card is the full-row variant
+		"dc-name",                              // card mirrors the name cell
+		"dc-money",                             // card mirrors the budget cell
+		"dc-op",                                // card mirrors the operation cell
+		"el.tagName === 'TR'",                  // FLIP animates the <td> cells for sub rows
+		"closest('table')",                     // placeCard clamps the card to the table bounds
+		"cells[k].style.width",                 // card cells get the measured column widths
+		"first.getBoundingClientRect().top",    // card clamped to the first data row's top
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("sub-drag shape missing %q", want)
@@ -712,12 +714,45 @@ func TestD35SubDragShape(t *testing.T) {
 		t.Fatalf("read app.css: %v", err)
 	}
 	for _, want := range []string{
-		".is-dragging .cat-subtable a.btn-link",         // Edit dimmed while dragging
-		".is-dragging .cat-subtable button.btn-link",    // Archive dimmed while dragging
+		".is-dragging .cat-subtable a.btn-link",           // Edit dimmed while dragging
+		".is-dragging .cat-subtable button.btn-link",      // Archive dimmed while dragging
 		".drag-card-sub .dc-op a, .drag-card-sub .dc-op button", // card ops dimmed
+		".cat-subtable .cat-op { text-align: right",       // operation column hugs the right edge
+		".drag-card-sub > span",                           // card cells mirror the <td> padding
+		"box-shadow: inset 3px 0 0 0 var(--accent)",       // accent bar is an inset shadow (no layout cost)
 	} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("app.css sub-drag dimming missing %q", want)
+		}
+	}
+}
+
+// TestD35TopDragShape pins the top-level (left pane) full-row drag card, which
+// mirrors the sub-card treatment for the parent categories: the card clones the
+// whole row (grip + name + count), re-scopes the name/count cell styles, and is
+// contained to the category list. Same client-side reasoning as the sub test.
+func TestD35TopDragShape(t *testing.T) {
+	a, _, sess := d35App(t)
+	html := d35Page(t, a, sess, "?class=expense")
+	for _, want := range []string{
+		"drag-card-top", // the top drag card is the full-row variant
+		"row.innerHTML", // card clones the whole row (grip + name + count)
+		"closest('.cat-list')", // placeCard contains the card to the category list
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("top-drag shape missing %q", want)
+		}
+	}
+	css, err := os.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
+	}
+	for _, want := range []string{
+		".drag-card-top .cat-name",  // name cell keeps the row's flex/ellipsis
+		".drag-card-top .cat-count", // count cell keeps the muted colour
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("app.css top-drag card missing %q", want)
 		}
 	}
 }
