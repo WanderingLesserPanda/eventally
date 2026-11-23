@@ -756,3 +756,39 @@ func TestD35TopDragShape(t *testing.T) {
 		}
 	}
 }
+
+// TestD35ReviewRefinementsShape pins the post-review typographic and layout
+// refinements to the two-pane Categories page, which live in the served
+// stylesheet rather than the rendered HTML: (1) a larger right-pane category
+// title, (2) a smaller italic muted envelope note, (3) a darker "Total
+// Budget:" label, (4) a centred operation-column header, (5) a narrower left
+// pane, and (6) an ellipsising right-pane title that keeps the Edit link inside
+// the card. Markers mirror the exact CSS; the runtime geometry is covered by the
+// Playwright refine harness.
+func TestD35ReviewRefinementsShape(t *testing.T) {
+	css, err := os.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatalf("read app.css: %v", err)
+	}
+	for _, want := range []string{
+		// (1) larger category title (1.1rem -> 1.25rem).
+		".cat-detail-title .cat-detail-name { font-weight: 700; font-size: 1.25rem",
+		// (2) smaller, italic, muted envelope note.
+		".cat-note { font-size: 0.85rem; font-style: italic; color: var(--muted)",
+		// (3) darker "Total Budget:" label (var(--muted) -> #4b5563).
+		".cat-total .muted { color: #4b5563",
+		// (4) centred operation header (the data cell stays right-aligned).
+		".cat-subtable th.cat-op { text-align: center",
+		// (5) narrower left pane (42% -> 25%, ~3/5 of the former width).
+		".cat-pane { flex: 0 0 25%; min-width: 200px",
+		// (6) ellipsising title: the title box can shrink, the name truncates,
+		// and the Edit link never compresses.
+		".cat-detail-title { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1 1 auto",
+		"text-overflow: ellipsis",
+		".cat-detail-head .btn-link { flex-shrink: 0",
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("app.css review refinements missing %q", want)
+		}
+	}
+}
