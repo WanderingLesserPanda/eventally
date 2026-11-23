@@ -83,6 +83,15 @@
       <button type="submit" class="btn-primary">{{if .Editing}}Save{{else}}Create{{end}}</button>
       <a class="btn" href="/categories">Cancel</a>
     </div>
+    {{if and .Editing (eq .F.ParentID 0)}}
+    <div class="cat-form-archive">
+      {{if .F.Active}}
+      <button type="button" class="btn-link" data-name="{{.F.Name}}" @click="archiveFromModal($event, {{.F.ID}})">Archive this category</button>
+      {{else}}
+      <button type="button" class="btn-link" @click="unarchiveFromModal({{.F.ID}})">Unarchive this category</button>
+      {{end}}
+    </div>
+    {{end}}
   </form>
 </div>
 {{end}}

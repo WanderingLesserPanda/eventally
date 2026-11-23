@@ -402,12 +402,12 @@ a.hh-item { cursor: pointer; }
   border-radius: 8px; cursor: pointer; border-left: 3px solid transparent;
 }
 .cat-row + .cat-row { margin-top: 0.15rem; }
-.cat-grip { color: var(--muted); opacity: 0.45; font-size: 1rem; }
+.cat-grip { color: var(--accent); opacity: 1; font-size: 1rem; }
 .cat-row .cat-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cat-row .cat-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .cat-row:hover { background: var(--bg); }
 .cat-row.selected { background: var(--sel); border-left-color: var(--accent); color: var(--accent); }
-.cat-row.selected .cat-grip, .cat-row.selected .cat-count { color: var(--accent); opacity: 0.7; }
+.cat-row.selected .cat-count { color: var(--accent); opacity: 0.7; }
 .cat-row.archived { opacity: 0.55; }
 .cat-empty { color: var(--muted); padding: 0.6rem 0.2rem; }
 .cat-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.6rem; }
@@ -419,6 +419,17 @@ a.hh-item { cursor: pointer; }
 .cat-subtable .cat-op { white-space: nowrap; }
 .cat-subtable .cat-op .cat-grip { margin-left: 0.7rem; }
 .cat-subtable tr.archived td { opacity: 0.55; }
+/* Drag-reorder highlight: the specific row being dragged, on both surfaces.
+   House-style cream tint + left accent bar, matching the selected row. */
+.cat-row.dragging { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
+.cat-subtable tr.dragging td { background: var(--sel); }
+.cat-subtable tr.dragging td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+/* Edit-modal archive control (top-level categories): a quiet destructive action
+   set off from the Save/Cancel actions. */
+.cat-form-archive { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--line); }
+.cat-form-archive .btn-link { color: var(--danger); }
+/* Sub-table with no subcategories: never render a bare header. */
+.cat-subempty { color: var(--muted); font-style: italic; padding: 0.6rem; }
 .cat-add-sub { display: inline-block; margin-top: 0.5rem; }
 @media (max-width: 760px) {
   .cat-body { flex-direction: column; }

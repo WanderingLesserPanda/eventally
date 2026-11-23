@@ -25,11 +25,11 @@ inspired by it, not a fork.
 | Q1 | Palette                  | **Warm terracotta**, scoped first to Categories, then **app-wide this wave** (§B). One token re-point, not a per-page patch |
 | Q2 | Row count                | Direct **subcategory** count (not subtree) |
 | Q3 | Reordering               | **Real** reorder reusing the existing `category.sort_order` (already the `ORDER BY` on budget cards + recurring selects) — one global order honoured everywhere; zero migration for reordering itself |
-| Q4 | Row actions + naming     | Per-sub-row **Edit + Archive** text buttons (Operation column); top-level actions live in the detail pane; **Archive / Unarchive** naming for categories |
+| Q4 | Row actions + naming     | Per-sub-row **Edit + Archive** text buttons (Operation column); top-level actions live in the detail pane; **Archive / Unarchive** naming for categories *(rev. 2026-11-23: top-level Archive/Unarchive moved to the Edit modal; subcategory Archive stays inline)* |
 | Q5 | Interaction              | **In-page** (Alpine `fetch`), page reloads minimised — standing preference, carried into the settings-page expansion |
 | Q6 | Budget                   | **Envelope model**: per-child mode flag (§D); `Total = standalone subs + max(parent's own budget, Σ "part-of" slices)`; over-allocation and no-budget-parent both **warn + auto add-on**; effective total is **computed, not written back** |
 | Q7 | Empty states             | Left pane keeps `No {class} categories yet.`; nudge text is `Please add a category first.` |
-| Q8 | Deactivate placement     | Moved to the **detail pane** (as Archive), off the flat row |
+| Q8 | Deactivate placement     | Moved to the **detail pane** (as Archive), off the flat row *(rev. 2026-11-23: top-level Archive/Unarchive relocated to the Edit Category modal)* |
 | Q9 | Create/edit              | In-page **modal** (see Q14) |
 | Q10 | Warm scope               | **All pages**, one batch (full page set in §B) |
 | Q11 | Row actions (final)      | **Edit + Archive only**; **Delete category is PARKED as an Open Item** (FK blast radius below) |
@@ -48,14 +48,21 @@ inspired by it, not a fork.
   `[drag grip] [name] [direct-subcategory count, muted]`. No per-category icon
   in the left pane (kept minimal to avoid bloating the UI; the category icon
   still renders in the detail-pane header and the sub-table). The drag grip is
-  the reorder affordance (Q13/§C). Selected row = cream tint + left accent bar
-  + accent text. (2026-11-22, user instruction: the icon is dropped from the
+  the reorder affordance (Q13/§C), rendered as a solid terracotta `la-braille`
+  dot glyph at full opacity (revised 2026-11-23 from the faint grey
+  `la-grip-vertical`); the specific row being dragged is highlighted (cream
+  tint + left accent bar, house style). Selected row = cream tint + left accent
+  bar + accent text. (2026-11-22, user instruction: the icon is dropped from the
   left pane; supersedes the earlier `[D32 icon, default la-tag]` row shorthand.)
 - **Right pane (detail)**: `[name] [icon]` header with an `Edit Category`
   link; a `Total Budget:` line (envelope rule, §D, `—` when nothing is
   budgeted); a three-column sub-table (accent-tinted header: Subcategory
-  Name / Budget Allocation / Operation) showing **the category itself first,
-  then its subcategories in `sort_order`**; `+ Add Subcategory` sits
+  Name / Budget Allocation / Operation) showing **only its subcategories in
+  `sort_order`** (reversed 2026-11-23, user instruction: the selected category
+  is no longer rendered as its own sub-table row — it is named in the pane
+  header instead; a category with no subcategories shows a muted
+  "No subcategories yet." row so the table never renders a bare header).
+  `+ Add Subcategory` sits
   **directly below the table** (or the dividing line, if none) — a standing
   placement rule, it is NOT a footer of the pane.
 - **One full page load.** Tab switch, row switch, create/edit, archive, and
@@ -164,7 +171,9 @@ sub renders its plain amount.
   page. **Unarchive** restores it. One-line confirm on Archive (reversible);
   Unarchive is a plain link.
 - Placement: per-sub-row **Archive** text button (Operation column); top-level
-  categories' Archive/Unarchive live in the **detail pane** (Q8).
+  categories' Archive/Unarchive live in the **Edit Category modal** (reversed
+  2026-11-23, user instruction, from the detail pane; subcategory Archive stays
+  inline in the sub-table).
 - Naming is **categories-only** (Q12). The app already had "Archived account"
   from D30; this wave makes categories consistent with it. Merchants, parties,
   and recurring keep "Deactivate" this wave.

@@ -166,6 +166,7 @@ document.addEventListener('alpine:init', () => {
     sortDirty() { return !!(this.topOrder || this.subOrder); },
     dragStart(evt, surface) {
       this.dragEl = evt.target.closest('li, tr');
+      if (this.dragEl) this.dragEl.classList.add('dragging');
       this.dragSurface = surface;
       try { evt.dataTransfer.effectAllowed = 'move'; evt.dataTransfer.setData('text/plain', ''); } catch (e) { /* Safari */ }
     },
@@ -184,6 +185,7 @@ document.addEventListener('alpine:init', () => {
       else parent.appendChild(this.dragEl);
     },
     dragEnd(evt, surface) {
+      if (this.dragEl) this.dragEl.classList.remove('dragging');
       const order = (surface === 'top') ? this.leftIDs() : this.subIDs();
       const clean = (surface === 'top') ? this.topClean : this.subClean;
       if (surface === 'top') this.topOrder = arrEq(order, clean) ? null : order;
@@ -201,14 +203,6 @@ document.addEventListener('alpine:init', () => {
       this.topOrder = null; this.subOrder = null;
       await this.reswap();
     },
-    // Top-level archive / unarchive (the category's own sub-table row): both
-    // panes change (the row demotes + the detail shows Unarchive), so reswap.
-    archiveTop(evt, id) {
-      const name = evt.target.dataset.name || '';
-      if (!confirm('Archive ' + name + '? It stays in history. You can unarchive it later.')) return;
-      return this.post('/categories/' + id + '/archive').then(() => this.reswap());
-    },
-    unarchiveTop(id) { return this.post('/categories/' + id + '/unarchive').then(() => this.reswap()); },
     // Sub archive / unarchive: only the detail pane's sub-table changes.
     archiveSub(evt, id) {
       const name = evt.target.dataset.name || '';
@@ -216,6 +210,15 @@ document.addEventListener('alpine:init', () => {
       return this.post('/categories/' + id + '/archive').then(() => this.loadDetail(this.selected));
     },
     unarchiveSub(id) { return this.post('/categories/' + id + '/unarchive').then(() => this.loadDetail(this.selected)); },
+    // Archive / unarchive from the Edit modal (top-level categories only; the
+    // subcategory archive stays inline in the sub-table). Confirm, POST, close
+    // the modal, and re-fetch both panes (the row demotes into the Archived group).
+    archiveFromModal(evt, id) {
+      const name = evt.target.dataset.name || '';
+      if (!confirm('Archive ' + name + '? It stays in history. You can unarchive it later.')) return;
+      return this.post('/categories/' + id + '/archive').then(() => { this.closeForm(); return this.reswap(); });
+    },
+    unarchiveFromModal(id) { return this.post('/categories/' + id + '/unarchive').then(() => { this.closeForm(); return this.reswap(); }); },
     // Re-fetch the left pane for the active class and the detail for the
     // currently selected category, re-applying the selection.
     async reswap() {

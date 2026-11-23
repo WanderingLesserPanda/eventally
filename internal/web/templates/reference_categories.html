@@ -55,7 +55,7 @@
   <li class="cat-row{{if not .Active}} archived{{end}}{{if eq .ID $.SelectedID}} selected{{end}}"
       data-id="{{.ID}}" @click="select({{.ID}})"
       draggable="true" @dragstart="dragStart($event,'top')" @dragover.prevent="dragOver($event)" @dragend="dragEnd($event,'top')">
-    <i class="la la-grip-vertical cat-grip" title="Reorder"></i>
+    <i class="la la-braille cat-grip" title="Reorder"></i>
     <span class="cat-name">{{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</span>
     <span class="cat-count">{{.Count}}</span>
   </li>
@@ -95,14 +95,7 @@
     <th class="money">Budget Allocation</th>
     <th class="cat-op">Operation</th>
   </tr>
-  <tr{{if not $d.Cat.Active}} class="archived"{{end}}>
-    <td class="cat-cell-name">{{catIcon $d.Cat.Icon}} {{$d.Cat.Name}}{{if not $d.Cat.Active}} <span class="tag">archived</span>{{end}}</td>
-    <td class="money">{{if $d.Cat.HasBudget}}{{money $d.Cat.Budget}}{{else}}—{{end}}</td>
-    <td class="cat-op">
-      <a class="btn-link small" href="/categories/{{$d.Cat.ID}}" @click.prevent="openForm('edit', {{$d.Cat.ID}}, 0)">Edit</a>
-      {{if $d.Cat.Active}}<button type="button" class="btn-link small" data-name="{{$d.Cat.Name}}" @click="archiveTop($event, {{$d.Cat.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveTop({{$d.Cat.ID}})">Unarchive</button>{{end}}
-    </td>
-  </tr>
+  {{if $d.Subs}}
   {{range $d.Subs}}
   <tr{{if not .Active}} class="archived"{{end}} data-child data-id="{{.ID}}"
       draggable="true" @dragstart="dragStart($event,'sub')" @dragover.prevent="dragOver($event)" @dragend="dragEnd($event,'sub')">
@@ -111,9 +104,12 @@
     <td class="cat-op">
       <a class="btn-link small" href="/categories/{{.ID}}" @click.prevent="openForm('edit', {{.ID}}, 0)">Edit</a>
       {{if .Active}}<button type="button" class="btn-link small" data-name="{{.Name}}" @click="archiveSub($event, {{.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveSub({{.ID}})">Unarchive</button>{{end}}
-      <i class="la la-grip-vertical cat-grip" title="Reorder"></i>
+      <i class="la la-braille cat-grip" title="Reorder"></i>
     </td>
   </tr>
+  {{end}}
+  {{else}}
+  <tr><td colspan="3" class="cat-subempty">No subcategories yet.</td></tr>
   {{end}}
 </table>
 <a class="cat-add-sub btn-link" href="/categories/new?parent={{$d.Cat.ID}}" @click.prevent="openForm('new', 0, {{$d.Cat.ID}})">＋ Add Subcategory</a>
