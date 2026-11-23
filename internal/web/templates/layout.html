@@ -60,15 +60,19 @@ document.addEventListener('alpine:init', () => {
     topOrder: null, subOrder: null, topClean: [], subClean: [],
     dragEl: null, dragSurface: null,
     $init() {
-      this.cls = this.$el.dataset.class || 'expense';
-      this.csrf = this.$el.dataset.csrf || '';
-      const sel = this.$el.querySelector('#cat-pane .cat-row.selected');
+      // The Categories page has one catsPage instance with unique pane ids.
+      // Look elements up by id against the document: in Alpine event-handler
+      // context this.$el is the triggering element, not the x-data root.
+      const root = document.querySelector('.cats');
+      this.cls = root.dataset.class || 'expense';
+      this.csrf = root.dataset.csrf || '';
+      const sel = root.querySelector('#cat-pane .cat-row.selected');
       if (sel) this.selected = sel.dataset.id;
       this.topClean = this.leftIDs();
       this.subClean = this.subIDs();
     },
-    pane() { return this.$el.querySelector('#cat-pane'); },
-    detail() { return this.$el.querySelector('#cat-detail'); },
+    pane() { return document.getElementById('cat-pane'); },
+    detail() { return document.getElementById('cat-detail'); },
     async fetchText(url) {
       const r = await fetch(url, { headers: { 'X-Requested-With': 'fetch' } });
       if (!r.ok) { alert('Request failed (HTTP ' + r.status + ')'); throw new Error('HTTP ' + r.status); }
@@ -77,8 +81,8 @@ document.addEventListener('alpine:init', () => {
     // Class-tab switch: swap the left pane, then load the new class's first row.
     async switchClass(c) {
       this.cls = c;
-      this.$el.dataset.class = c;
-      this.$el.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.class === c));
+      document.querySelector('.cats').dataset.class = c;
+      document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.class === c));
       this.topOrder = null;
       this.pane().innerHTML = await this.fetchText('/categories/pane?class=' + encodeURIComponent(c));
       this.topClean = this.leftIDs();
@@ -90,7 +94,7 @@ document.addEventListener('alpine:init', () => {
     // Row switch: mark the row selected and swap the detail pane in place.
     async loadDetail(id) {
       this.selected = String(id);
-      this.$el.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
+      document.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
       this.subOrder = null;
       this.detail().innerHTML = await this.fetchText('/categories/detail?id=' + encodeURIComponent(id));
       this.subClean = this.subIDs();
@@ -101,7 +105,7 @@ document.addEventListener('alpine:init', () => {
     //     on a validation error, and on success closes the modal + re-fetches
     //     the panes. The D32 icon picker inside the form opens as a second modal.
     formOpen: false,
-    formHost() { return this.$el.querySelector('#cat-form-host'); },
+    formHost() { return document.getElementById('cat-form-host'); },
     closeForm() { this.formOpen = false; },
     async openForm(mode, id, parent) {
       const url = (mode === 'edit')
@@ -157,8 +161,8 @@ document.addEventListener('alpine:init', () => {
       });
     },
     // --- Save Sort (drag preview, staged commit) ---
-    leftIDs() { return Array.from(this.$el.querySelectorAll('#cat-pane .cat-row')).map(r => r.dataset.id); },
-    subIDs() { return Array.from(this.$el.querySelectorAll('#cat-detail tr[data-child]')).map(r => r.dataset.id); },
+    leftIDs() { return Array.from(document.querySelectorAll('#cat-pane .cat-row')).map(r => r.dataset.id); },
+    subIDs() { return Array.from(document.querySelectorAll('#cat-detail tr[data-child]')).map(r => r.dataset.id); },
     sortDirty() { return !!(this.topOrder || this.subOrder); },
     dragStart(evt, surface) {
       this.dragEl = evt.target.closest('li, tr');
@@ -218,7 +222,7 @@ document.addEventListener('alpine:init', () => {
       this.topOrder = null; this.subOrder = null;
       this.pane().innerHTML = await this.fetchText('/categories/pane?class=' + encodeURIComponent(this.cls));
       this.topClean = this.leftIDs();
-      this.$el.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
+      document.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
       if (this.selected) return this.loadDetail(this.selected);
       this.subClean = [];
       this.detail().innerHTML = '<p class="cat-empty">Please add a category first.</p>';
