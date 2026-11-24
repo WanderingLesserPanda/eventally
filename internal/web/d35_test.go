@@ -718,8 +718,10 @@ func TestD35SubDragShape(t *testing.T) {
 		".is-dragging .cat-subtable button.btn-link",      // Archive dimmed while dragging
 		".drag-card-sub .dc-op a, .drag-card-sub .dc-op button", // card ops dimmed
 		// operation column hugs the right edge (4th-review 2026-11-24: the cell
-		// is a flex row, Edit/Archive/grip right-aligned with a 0.5rem gap).
-		".cat-subtable td.cat-op { display: flex; align-items: center; justify-content: flex-end",
+		// is a NORMAL table cell — right-aligned, Edit/Archive/grip spaced with a
+		// 0.5rem sibling gap — NOT a flex <td>, which broke the table's row borders).
+		".cat-subtable td.cat-op { text-align: right",
+		".cat-subtable td.cat-op > * + * { margin-left: 0.5rem",
 		".drag-card-sub > span",                           // card cells mirror the <td> padding
 		"box-shadow: inset 3px 0 0 0 var(--accent)",       // accent bar is an inset shadow (no layout cost)
 	} {

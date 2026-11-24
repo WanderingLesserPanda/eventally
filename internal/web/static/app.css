@@ -429,7 +429,8 @@ a.hh-item { cursor: pointer; }
 .cat-subtable .cat-cell-name .la { margin-right: 0.4rem; font-size: 1.15rem; line-height: 1; }
 .cat-subtable .cat-op { white-space: nowrap; }
 .cat-subtable th.cat-op { text-align: right; }
-.cat-subtable td.cat-op { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; }
+.cat-subtable td.cat-op { text-align: right; }
+.cat-subtable td.cat-op > * + * { margin-left: 0.5rem; }
 .cat-subtable tr.archived td { opacity: 0.55; }
 /* D35 drag reorder (custom pointer events): the grip is the handle, the
    dragged row becomes a hollow slot, and a floating card follows the cursor.
@@ -472,7 +473,7 @@ a.hh-item { cursor: pointer; }
 }
 .drag-card-sub > span { padding: 0.5rem 0.6rem; box-sizing: border-box; white-space: nowrap; }
 .drag-card-sub .dc-name { flex: 0 0 auto; text-align: left; overflow: hidden; text-overflow: ellipsis; }
-.drag-card-sub .dc-money { flex: 0 0 auto; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.drag-card-sub .dc-money { flex: 0 0 auto; text-align: left; color: var(--muted); font-variant-numeric: tabular-nums; }
 .drag-card-sub .dc-op { flex: 0 0 auto; text-align: right; }
 .drag-card-sub .dc-op a, .drag-card-sub .dc-op button { opacity: 0.45; }
 .drag-card-sub .dc-op .cat-grip { opacity: 1; }

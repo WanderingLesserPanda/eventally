@@ -56,19 +56,33 @@ func TestCatUI_B5_shape(t *testing.T) {
 			t.Errorf("item9: css missing %q", want)
 		}
 	}
+	// Item 9 (drag card): the floating card's budget cell must match the
+	// table's left-aligned budget column. Regression: item 9 left-aligned the
+	// table cell but the card's .dc-money stayed right-aligned, so the card's
+	// budget value sat at the wrong edge during a reorder drag.
+	if !hasRule(css, ".drag-card-sub .dc-money", "text-align: left") {
+		t.Error("item9: drag-card budget cell (.dc-money) must be left-aligned like the table")
+	}
 
 	// Item 1 + 4: one coherent alignment (right-aligned header + cell) with a
-	// gap between the Edit / Archive / grip cluster.
+	// gap between the Edit / Archive / grip cluster. The cell is a NORMAL
+	// table cell (not a flex container — a flex <td> breaks the table's row
+	// borders); it right-aligns the inline cluster and spaces it with a
+	// sibling margin.
 	if !hasRule(css, "th.cat-op", "text-align: right") {
 		t.Error("item1: operation header must be right-aligned")
 	}
 	if strings.Contains(css, "th.cat-op { text-align: center") {
 		t.Error("item1: the old centred operation header is still present")
 	}
-	for _, want := range []string{"justify-content: flex-end", "gap: 0.5rem", "display: flex"} {
-		if !hasRule(css, "td.cat-op", want) {
-			t.Errorf("item1/4: td.cat-op missing %q", want)
-		}
+	if !hasRule(css, "td.cat-op", "text-align: right") {
+		t.Error("item1: operation cell must be right-aligned")
+	}
+	if !hasRule(css, "td.cat-op > * + *", "margin-left: 0.5rem") {
+		t.Error("item4: Edit/Archive/grip must keep a 0.5rem gap")
+	}
+	if strings.Contains(css, "td.cat-op { display: flex") {
+		t.Error("item1: the flex <td> (which breaks table row borders) is still present")
 	}
 
 	// Item 5: detail-head icon sized to the title; Item 7: sub-row icon enlarged.
