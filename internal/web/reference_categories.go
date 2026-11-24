@@ -28,6 +28,9 @@ type Category struct {
 	Active     bool
 	// Icon is the D32 picked glyph key (la-*) from the registry; "" = unpicked.
 	Icon string
+	// Colour is the D36 tint: a normalised 6-hex string (e.g. "b84810"); "" =
+	// no tint (the glyph inherits the surrounding text colour).
+	Colour string
 	// BudgetMode is "standalone" (default; the sub's budget adds on) or
 	// "part_of_parent" (a slice of the parent's envelope). Meaningful only on a
 	// subcategory; a top-level category is always its own envelope.
@@ -38,7 +41,7 @@ type Category struct {
 // SELECT (the edit handler and the detail pane load by id, no parent join).
 const categorySelectOne = `id, name, COALESCE(parent_id, 0), '', transaction_class,
 	COALESCE(budget_per_month, 0), budget_per_month IS NOT NULL, is_budgetable, is_active,
-	COALESCE(icon, ''), COALESCE(budget_mode, 'standalone')`
+	COALESCE(icon, ''), COALESCE(colour, ''), COALESCE(budget_mode, 'standalone')`
 
 var categoryClasses = []string{"expense", "income", "transfer"}
 
@@ -140,13 +143,13 @@ func (a *App) catDetailData(ctx context.Context, hh, id int64) (catDetail, error
 	err := a.Pool.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM category WHERE id = $2 AND household_id = $1`, categorySelectOne), hh, id).
 		Scan(&d.Cat.ID, &d.Cat.Name, &d.Cat.ParentID, &d.Cat.ParentName, &d.Cat.Class,
-			&d.Cat.Budget, &d.Cat.HasBudget, &d.Cat.Budgetable, &d.Cat.Active, &d.Cat.Icon, &d.Cat.BudgetMode)
+			&d.Cat.Budget, &d.Cat.HasBudget, &d.Cat.Budgetable, &d.Cat.Active, &d.Cat.Icon, &d.Cat.Colour, &d.Cat.BudgetMode)
 	if err != nil {
 		return d, err
 	}
 	rows, err := a.Pool.Query(ctx, `
 		SELECT id, name, COALESCE(parent_id,0), '', transaction_class,
-		       COALESCE(budget_per_month,0), budget_per_month IS NOT NULL, is_budgetable, is_active, COALESCE(icon,''), COALESCE(budget_mode,'standalone')
+		       COALESCE(budget_per_month,0), budget_per_month IS NOT NULL, is_budgetable, is_active, COALESCE(icon,''), COALESCE(colour,''), COALESCE(budget_mode,'standalone')
 		FROM category WHERE household_id = $1 AND parent_id = $2
 		ORDER BY is_active DESC, sort_order, name`, hh, id)
 	if err != nil {
@@ -156,7 +159,7 @@ func (a *App) catDetailData(ctx context.Context, hh, id int64) (catDetail, error
 	for rows.Next() {
 		var s Category
 		if err := rows.Scan(&s.ID, &s.Name, &s.ParentID, &s.ParentName, &s.Class,
-			&s.Budget, &s.HasBudget, &s.Budgetable, &s.Active, &s.Icon, &s.BudgetMode); err != nil {
+			&s.Budget, &s.HasBudget, &s.Budgetable, &s.Active, &s.Icon, &s.Colour, &s.BudgetMode); err != nil {
 			return d, err
 		}
 		d.Subs = append(d.Subs, s)
@@ -362,6 +365,12 @@ func (a *App) parseCategoryForm(r *http.Request, f CategoryForm) CategoryForm {
 		f.Err = "Unknown icon."
 		return f
 	}
+	// D36: normalise + validate the colour; an invalid hex is silently cleared
+	// (no tint) — a preset and a custom hex are stored identically (ADR-0013).
+	f.Colour = normaliseColour(r.FormValue("colour"))
+	if !colourValid(f.Colour) {
+		f.Colour = ""
+	}
 	// D35 §D: budget mode. The form sends "part_of_parent" only when the
 	// subcategory's budget-mode checkbox is checked; otherwise it is absent
 	// (standalone). App-side validation (standalone | part_of_parent). A
@@ -442,9 +451,9 @@ func (a *App) handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
 		budget = f.Budget
 	}
 	_, err := a.Pool.Exec(r.Context(),
-		`INSERT INTO category (household_id, name, parent_id, transaction_class, budget_per_month, is_budgetable, icon, budget_mode)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		hh, f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon), f.BudgetMode)
+		`INSERT INTO category (household_id, name, parent_id, transaction_class, budget_per_month, is_budgetable, icon, budget_mode, colour)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		hh, f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon), f.BudgetMode, f.Colour)
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "A category with this name already exists."
@@ -475,7 +484,7 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 	err := a.Pool.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM category WHERE id = $2 AND household_id = $1`, categorySelectOne), hh, id).
 		Scan(&cur.ID, &cur.Name, &cur.ParentID, &cur.ParentName, &cur.Class,
-			&cur.Budget, &cur.HasBudget, &cur.Budgetable, &cur.Active, &cur.Icon, &cur.BudgetMode)
+			&cur.Budget, &cur.HasBudget, &cur.Budgetable, &cur.Active, &cur.Icon, &cur.Colour, &cur.BudgetMode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.Error(w, "not found", 404)
 		return
@@ -519,9 +528,9 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = a.Pool.Exec(ctx,
 		`UPDATE category SET name=$1, parent_id=$2, transaction_class=$3,
-		 budget_per_month=$4, is_budgetable=$5, icon=$6, budget_mode=$7
-		 WHERE id=$8 AND household_id=$9`,
-		f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon), f.BudgetMode, id, hh)
+		 budget_per_month=$4, is_budgetable=$5, icon=$6, budget_mode=$7, colour=$8
+		 WHERE id=$9 AND household_id=$10`,
+		f.Name, parentID, f.Class, budget, f.Budgetable, iconOrNil(f.Icon), f.BudgetMode, f.Colour, id, hh)
 	if err != nil {
 		if isUniqueViolation(err) {
 			f.Err = "A category with this name already exists."

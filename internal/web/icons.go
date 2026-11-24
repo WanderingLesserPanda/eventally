@@ -11,6 +11,7 @@ package web
 import (
 	"html"
 	"html/template"
+	"strings"
 )
 
 // iconGlyph is one registry entry. Key is the stored value and the CSS
@@ -446,11 +447,91 @@ func iconStyle(key string) string {
 	return "la"
 }
 
+// iconColours is the curated D36 palette (design doc §B, user-locked
+// 2026-11-24). It backs the picker's "Predefined colours" tab — a UX
+// convenience, not a constraint: any valid #rrggbb the user types is accepted
+// identically (ADR-0013). The stored form is the normalised 6-hex string
+// without "#".
+var iconColours = []struct{ Name, Hex string }{
+	{"Terracotta", "b84810"},
+	{"Coral", "e86a4a"},
+	{"Amber", "ff9500"},
+	{"Honey", "f2b32e"},
+	{"Leaf", "7ba32e"},
+	{"Fern", "2e8b57"},
+	{"Teal", "009688"},
+	{"Lagoon", "4fb3d9"},
+	{"Ocean", "2196f3"},
+	{"Indigo", "3f51b5"},
+	{"Violet", "673ab7"},
+	{"Orchid", "9c27b0"},
+	{"Rose", "e0559d"},
+	{"Brick", "d64545"},
+	{"Slate", "8e8e93"},
+	{"Ink", "3a3a3a"},
+}
+
+// colourHex returns a palette entry's normalised hex by name ("" if none).
+func colourHex(name string) string {
+	for _, c := range iconColours {
+		if c.Name == name {
+			return c.Hex
+		}
+	}
+	return ""
+}
+
+// normaliseColour trims, strips one leading "#", and lowercases a colour into
+// D36's stored form: a 6-hex string without "#". Empty stays empty.
+func normaliseColour(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "#")
+	return strings.ToLower(s)
+}
+
+// colourValid reports whether c is a storable colour: empty (no tint) or a
+// normalised 6-hex string. App-side validation — no DB CHECK (ADR-0009/0013).
+func colourValid(c string) bool {
+	if c == "" {
+		return true
+	}
+	if len(c) != 6 {
+		return false
+	}
+	for i := 0; i < 6; i++ {
+		d := c[i]
+		if !((d >= '0' && d <= '9') || (d >= 'a' && d <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// colourOrNil maps a stored colour to a SQL value: empty clears the tint
+// (NULL), a non-empty value is stored as-is.
+func colourOrNil(c string) any {
+	if c == "" {
+		return nil
+	}
+	return c
+}
+
 // iconTag renders a resolved glyph key as an <i> element. Keys reach here
 // only through resolve* (registry membership checked), so the key is a
-// registry token, never free user input.
-func iconTag(key string) template.HTML {
-	return template.HTML(`<i class="` + iconStyle(key) + ` ` + html.EscapeString(key) + `"></i>`)
+// registry token, never free user input. colour (optional) tints the glyph
+// inline as style="color:#<hex>"; an empty or invalid value leaves the style
+// off so the glyph inherits the surrounding text colour.
+func iconTag(key string, colour ...string) template.HTML {
+	if key == "" {
+		return ""
+	}
+	style := ""
+	if len(colour) > 0 {
+		if c := normaliseColour(colour[0]); c != "" && colourValid(c) {
+			style = ` style="color:#` + c + `"`
+		}
+	}
+	return template.HTML(`<i class="` + iconStyle(key) + ` ` + html.EscapeString(key) + `"` + style + `></i>`)
 }
 
 // iconOrNil maps the form value to its DB value: "" (unpicked) → NULL.
@@ -462,13 +543,15 @@ func iconOrNil(s string) any {
 }
 
 // catIcon is the category template function (dashboard, /txns, review,
-// forms): the picked glyph, or the tag default.
-func catIcon(stored string) template.HTML {
-	return iconTag(resolveCategoryIcon(stored))
+// forms): the picked glyph, or the tag default. The optional second arg tints
+// the glyph (D36).
+func catIcon(stored string, colour ...string) template.HTML {
+	return iconTag(resolveCategoryIcon(stored), colour...)
 }
 
 // acctIcon is the account template function (accounts grid, cards page,
-// forms): the picked glyph, or the per-type default.
-func acctIcon(stored, typ string) template.HTML {
-	return iconTag(resolveAccountIcon(stored, typ))
+// forms): the picked glyph, or the per-type default. The optional third arg
+// tints the glyph (D36).
+func acctIcon(stored, typ string, colour ...string) template.HTML {
+	return iconTag(resolveAccountIcon(stored, typ), colour...)
 }
