@@ -290,6 +290,7 @@ func (a *App) renderCategoryForm(w http.ResponseWriter, r *http.Request, f Categ
 		"Classes":    categoryClasses,
 		"Editing":    f.ID > 0,
 		"IconGroups": iconGroups(),
+		"Colours":    iconColours,
 	})
 }
 
@@ -309,6 +310,7 @@ func (a *App) renderCategoryFormFragment(w http.ResponseWriter, r *http.Request,
 		"Classes":    categoryClasses,
 		"Editing":    editing,
 		"IconGroups": iconGroups(),
+		"Colours":    iconColours,
 	})
 }
 

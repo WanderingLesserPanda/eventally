@@ -44,6 +44,42 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 });
+// D36: colour picker (docs/notes/d36-icon-colour-palette.md §D). An anchored
+// popover (not a modal), parallel to the D32 iconPicker. It shares the form's
+// x-data root with iconPicker (Object.assign), so it reads pKey/pStyle for the
+// live tint preview. A selection sets the hidden `colour` input (6 lowercase
+// hex, or '' to clear). Presets and custom hex are stored identically (ADR-0013).
+document.addEventListener('alpine:init', () => {
+  Alpine.data('colourPicker', (picked) => ({
+    cOpen: false,
+    cKey: picked || '',                        // 6 lowercase hex, or ''
+    cTab: 'preset',                            // 'preset' | 'custom'
+    cHex: picked ? '#' + picked : '',          // custom text input (with #)
+    cNative: picked ? '#' + picked : '#888888',// native <input type="color">
+    cErr: false,                               // custom hex invalid
+    // Apply a colour (6-lowercase-hex, or '' to clear), optionally closing.
+    cSel(hex, close) {
+      this.cKey = hex;
+      this.cHex = hex ? '#' + hex : '';
+      this.cNative = hex ? '#' + hex : '#888888';
+      this.cErr = false;
+      if (close) this.cOpen = false;
+    },
+    // Native colour input → 6-lowercase-hex (its value is always #rrggbb).
+    cNativeSync() {
+      const h = (this.cNative || '').replace('#', '').toLowerCase();
+      if (/^[0-9a-f]{6}$/.test(h)) { this.cKey = h; this.cHex = '#' + h; this.cErr = false; }
+    },
+    // Free hex text: normalise (strip #, lowercase) + validate; '' clears.
+    cTextSync() {
+      const h = (this.cHex || '').replace('#', '').toLowerCase();
+      if (h === '' || /^[0-9a-f]{6}$/.test(h)) {
+        this.cKey = h; this.cErr = false;
+        if (h) this.cNative = '#' + h;
+      } else { this.cErr = true; }
+    },
+  }));
+});
 // D35: two-pane Categories page (ADR-0011). The page loads once; class-tab
 // switch, row switch, and archive / unarchive are in-page fetch swaps (a GET
 // fragment replaces a pane; a POST returns JSON and the changed panes are

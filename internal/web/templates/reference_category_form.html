@@ -11,7 +11,7 @@
      modal-over-modal). The server renders it as a fragment when the request
      carries X-Requested-With: fetch; a plain browser submit still works. -->
 {{define "cat_form"}}
-<div x-data="iconPicker('{{.F.Icon}}', '{{iconStyle .F.Icon}}')">
+<div x-data="Object.assign(iconPicker('{{.F.Icon}}', '{{iconStyle .F.Icon}}'), colourPicker('{{.F.Colour}}'))">
   {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
   <form method="post" action="{{if .Editing}}/categories/{{.F.ID}}{{else}}/categories{{end}}">
     {{template "csrf" .}}
@@ -99,6 +99,49 @@
         </div>
       </div>
     </div>
+    <!-- D36: colour picker (docs/notes/d36-icon-colour-palette.md §D). Separate
+         Colour field + anchored popover, sibling to the D32 icon control. The
+         container carries @click.outside so the "Choose" button (a sibling, not
+         a descendant of the popover) toggles without racing the outside handler. -->
+    <div class="colour-field" @click.outside="cOpen = false">
+      <span>Colour</span>
+      <button type="button" class="btn" @click="cOpen = !cOpen">Choose…</button>
+      <span class="colour-chip" x-show="cKey" x-cloak :style="'background:#' + cKey"></span>
+      <span class="muted small" x-show="!cKey" x-cloak>default</span>
+      <div x-show="cOpen" x-cloak class="colour-pop" role="dialog" aria-label="Choose a colour">
+        <div class="colour-tabs">
+          <button type="button" class="colour-tab" :class="{ active: cTab === 'preset' }" @click="cTab = 'preset'">Predefined</button>
+          <button type="button" class="colour-tab" :class="{ active: cTab === 'custom' }" @click="cTab = 'custom'">Custom</button>
+        </div>
+        <div x-show="cTab === 'preset'" x-cloak class="colour-tabpane">
+          <div class="colour-preview">
+            <i :class="pStyle + ' ' + (pKey || 'la-tag')" :style="cKey ? 'color:#' + cKey : ''"></i>
+            <span class="muted small">preview</span>
+          </div>
+          <div class="colour-swatches">
+            <button type="button" class="colour-swatch colour-swatch-none" title="No colour (default)" aria-label="No colour (default)" @click="cSel('', true)"></button>
+            {{range .Colours}}<button type="button" class="colour-swatch" :class="{ selected: cKey === '{{.Hex}}' }" :style="'background:#' + '{{.Hex}}'" title="{{.Name}}" @click="cSel('{{.Hex}}', true)"></button>
+            {{end}}
+          </div>
+        </div>
+        <div x-show="cTab === 'custom'" x-cloak class="colour-tabpane">
+          <div class="colour-preview">
+            <i :class="pStyle + ' ' + (pKey || 'la-tag')" :style="cKey ? 'color:#' + cKey : ''"></i>
+            <span class="muted small">preview</span>
+          </div>
+          <div class="colour-custom">
+            <input type="color" x-model="cNative" @input="cNativeSync()" @change="cNativeSync()" class="colour-native" aria-label="Colour picker">
+            <input type="text" x-model="cHex" @input="cTextSync()" class="colour-hex" placeholder="#rrggbb" maxlength="7" aria-label="Hex colour">
+          </div>
+          <div class="colour-err" x-show="cErr" x-cloak>Invalid hex (use #rrggbb)</div>
+          <div class="colour-actions">
+            <button type="button" class="btn-primary" @click="cOpen = false">Set</button>
+            <button type="button" class="btn-link" @click="cOpen = false">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <input type="hidden" name="colour" x-ref="colourInput" :value="cKey">
     <div class="form-actions">
       <button type="submit" class="btn-primary">{{if .Editing}}Save{{else}}Create{{end}}</button>
       <a class="btn" href="/categories">Cancel</a>

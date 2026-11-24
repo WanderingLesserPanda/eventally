@@ -302,6 +302,7 @@ func (a *App) renderAccountFormL(w http.ResponseWriter, r *http.Request, f Accou
 		"Lifecycle":  lc,
 		"Flash":      flashFrom(r),
 		"IconGroups": iconGroups(),
+		"Colours":    iconColours,
 	})
 }
 
