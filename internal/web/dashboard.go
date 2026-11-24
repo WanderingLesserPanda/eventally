@@ -20,6 +20,7 @@ type dashCatRow struct {
 	// Icon is the D32 glyph key ("" = unpicked; the template renders the
 	// category default via the catIcon function).
 	Icon   string
+	Colour string // D36 hex tint ("" = no tint)
 	Actual money.Money
 	Budget money.Money
 }
@@ -56,7 +57,7 @@ func (a *App) dashCategoryRows(ctx context.Context, p *perms, hh, user int64, mo
 			JOIN tree t ON c.parent_id = t.id
 			WHERE c.household_id = $1 AND c.is_active
 		)
-		SELECT tops.id, tops.name, COALESCE(tops.icon, ''),
+		SELECT tops.id, tops.name, COALESCE(tops.icon, ''), COALESCE(tops.colour, ''),
 		       ( -- envelope total: (Σ standalone subs) + GREATEST(own budget, Σ slices)
 		         (SELECT COALESCE(SUM(COALESCE(c.budget_per_month, 0)), 0)
 		          FROM category c
@@ -91,7 +92,7 @@ func (a *App) dashCategoryRows(ctx context.Context, p *perms, hh, user int64, mo
 	for rows.Next() {
 		var c dashCatRow
 		var id int64
-		if err := rows.Scan(&id, &c.Name, &c.Icon, &c.Budget, &c.Actual); err != nil {
+		if err := rows.Scan(&id, &c.Name, &c.Icon, &c.Colour, &c.Budget, &c.Actual); err != nil {
 			rows.Close()
 			return nil, err
 		}

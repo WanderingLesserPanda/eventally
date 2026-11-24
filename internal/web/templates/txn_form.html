@@ -42,7 +42,7 @@
         <select name="category_id" {{if $f.Locked}}disabled{{end}}>
           <option value="">— none —</option>
           {{$c := $f.CategoryID}}{{range $f.Cats}}
-          <option value="{{.ID}}" {{if eq .ID $c}}selected{{end}}>{{if .Parent}}({{.Parent}}) {{end}}{{catIcon .Icon}} {{.Name}}</option>
+          <option value="{{.ID}}" {{if eq .ID $c}}selected{{end}}>{{if .Parent}}({{.Parent}}) {{end}}{{catIcon .Icon .Colour}} {{.Name}}</option>
           {{end}}
         </select>
       </label>

@@ -47,7 +47,7 @@
     <label>Category
       <select name="category">
         <option value="">all</option>
-        {{range .Cats}}<option value="{{.ID}}" {{if eq .ID $f.CategoryID}}selected{{end}}>{{catIcon .Icon}} {{.Name}}</option>{{end}}
+        {{range .Cats}}<option value="{{.ID}}" {{if eq .ID $f.CategoryID}}selected{{end}}>{{catIcon .Icon .Colour}} {{.Name}}</option>{{end}}
       </select>
     </label>
     <label>Account
@@ -72,7 +72,7 @@
       </td>
       <td>{{date .Date}}</td>
       <td><a href="/txns/{{.ID}}">{{.Label}}{{if .Original}}<br><span class="muted small">{{.Original}}</span>{{end}}</a></td>
-      <td>{{if .NoCat}}<span class="tag no-cat">no category</span>{{else}}{{catIcon .Icon}} {{orDash .Category}}{{end}}</td>
+      <td>{{if .NoCat}}<span class="tag no-cat">no category</span>{{else}}{{catIcon .Icon .Colour}} {{orDash .Category}}{{end}}</td>
       <td class="money">{{money .Total}}</td>
       <td>{{orDash .FromTo}}</td>
       <td><span class="tag">{{.Status}}</span>{{if .Synced}}<span class="tag synced">synced ✓</span>{{end}}{{range .SyncedBy}}<span class="tag a-synced">synced by {{.}}</span>{{end}}</td>

@@ -61,7 +61,8 @@ type opt struct {
 	Name   string
 	Parent string // category only: parent's name, "" for top level
 	// Icon is category only: the D32 glyph key ("" = unpicked).
-	Icon string
+	Icon   string
+	Colour string // D36 hex tint ("" = no tint)
 }
 
 type merchantOpt struct {
@@ -160,7 +161,7 @@ func (a *App) txnFormOptions(ctx context.Context, hh int64) (*txnOptions, error)
 
 	// Categories (with parent name for the optgroup label).
 	rows, err = a.Pool.Query(ctx, `
-		SELECT c.id, c.name, COALESCE(p.name, ''), COALESCE(c.icon, '')
+		SELECT c.id, c.name, COALESCE(p.name, ''), COALESCE(c.icon, ''), COALESCE(c.colour, '')
 		FROM category c LEFT JOIN category p ON p.id = c.parent_id
 		WHERE c.household_id = $1 AND (c.is_active
 			OR c.id IN (SELECT category_id FROM "transaction"
@@ -171,7 +172,7 @@ func (a *App) txnFormOptions(ctx context.Context, hh int64) (*txnOptions, error)
 	}
 	for rows.Next() {
 		var c opt
-		if err := rows.Scan(&c.ID, &c.Name, &c.Parent, &c.Icon); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Parent, &c.Icon, &c.Colour); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -979,7 +980,8 @@ type txnLine struct {
 	// Icon is the D32 category glyph key ("" = unpicked or no category; the
 	// template renders the category default via the catIcon function).
 	Icon     string
-	NoCat    bool // D34: legacy row without a category — the explicit "no category" marker
+	Colour   string // D36 hex tint ("" = no tint)
+	NoCat    bool   // D34: legacy row without a category — the explicit "no category" marker
 	Total    money.Money
 	Charged  string // e.g. "JPY", "" when base currency
 	Original string // e.g. "400 JPY" when Charged != ""
@@ -1058,7 +1060,7 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.Pool.Query(ctx, `
 		SELECT t.id, t.transaction_date, t.description, t.total_amount,
 		       COALESCE(t.charged_currency, ''), COALESCE(t.amount_original, 0),
-		       t.record_status, COALESCE(c.name, ''), COALESCE(c.icon, ''), COALESCE(m.name, ''),
+		       t.record_status, COALESCE(c.name, ''), COALESCE(c.icon, ''), COALESCE(c.colour, ''), COALESCE(m.name, ''),
 		       COALESCE(oa.name, COALESCE(oc.name, COALESCE(m.name, ''))),
 		       COALESCE(da.name, COALESCE(dc.name, '')),
 		       COALESCE(t.is_synced, false)
@@ -1088,7 +1090,7 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 			_      = ot
 		)
 		if err := rows.Scan(&l.ID, &l.Date, &desc, &l.Total, &l.Charged, &orig,
-			&l.Status, &l.Category, &l.Icon, &merch, &ot, &dt, &l.Synced); err != nil {
+			&l.Status, &l.Category, &l.Icon, &l.Colour, &merch, &ot, &dt, &l.Synced); err != nil {
 			http.Error(w, "scan transaction: "+err.Error(), 500)
 			return
 		}
@@ -1149,7 +1151,7 @@ func (a *App) listTxns(w http.ResponseWriter, r *http.Request) {
 func (a *App) activeCategoryOptions(ctx context.Context, hh int64) []opt {
 	var out []opt
 	rows, err := a.Pool.Query(ctx,
-		`SELECT id, name, COALESCE(icon, '') FROM category WHERE household_id = $1 AND is_active
+		`SELECT id, name, COALESCE(icon, ''), COALESCE(colour, '') FROM category WHERE household_id = $1 AND is_active
 		 ORDER BY sort_order, name`, hh)
 	if err != nil {
 		return out
@@ -1157,7 +1159,7 @@ func (a *App) activeCategoryOptions(ctx context.Context, hh int64) []opt {
 	defer rows.Close()
 	for rows.Next() {
 		var c opt
-		_ = rows.Scan(&c.ID, &c.Name, &c.Icon)
+		_ = rows.Scan(&c.ID, &c.Name, &c.Icon, &c.Colour)
 		out = append(out, c)
 	}
 	return out
@@ -1274,6 +1276,7 @@ type txnDetail struct {
 	Category    string
 	// Icon is the D32 category glyph key ("" = unpicked or no category).
 	Icon        string
+	Colour      string // D36 hex tint ("" = no tint)
 	Notes       string
 	Total       money.Money
 	Charged     string
@@ -1320,10 +1323,10 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 
 	var t txnDetail
 	var (
-		catsel, mers       int64
-		charged            string
-		orig, rate         float64
-		merch, cat, catIco string
+		catsel, mers               int64
+		charged                    string
+		orig, rate                 float64
+		merch, cat, catIco, catCol string
 	)
 	err = a.Pool.QueryRow(ctx, `
 		SELECT t.id, t.transaction_date, t.class, t.description, t.notes,
@@ -1334,7 +1337,7 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(t.charged_currency, ''), COALESCE(t.amount_original, 0),
 		       COALESCE(t.exchange_rate, 0), COALESCE(t.merchant_id, 0), COALESCE(t.category_id, 0),
 		       COALESCE(t.receipt_path, ''),
-		       COALESCE(m2.name, ''), COALESCE(c2.name, ''), COALESCE(c2.icon, '')
+		       COALESCE(m2.name, ''), COALESCE(c2.name, ''), COALESCE(c2.icon, ''), COALESCE(c2.colour, '')
 		FROM "transaction" t
 		LEFT JOIN app_user u ON u.id = t.recorded_by_user_id
 		LEFT JOIN account oa ON oa.id = t.origin_account_id
@@ -1348,7 +1351,7 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 			&t.Status, &t.Source, &t.Synced, &t.RecordedBy,
 			&t.OriginLabel, &t.DestLabel,
 			&charged, &orig, &rate, &mers, &catsel, &t.ReceiptPath,
-			&merch, &cat, &catIco)
+			&merch, &cat, &catIco, &catCol)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -1364,7 +1367,7 @@ func (a *App) handleTxnDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.Merchant, t.Category = merch, cat
-	t.Icon = catIco
+	t.Icon, t.Colour = catIco, catCol
 	t.NoCat = catsel == 0
 	// A copy offers the detach action while it is currently synced
 	// (is_synced). Detach is what flips it off; a row is synced only if it

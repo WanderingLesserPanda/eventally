@@ -23,7 +23,7 @@
     </td></tr>
     {{if $t.Description}}<tr><th>Description</th><td>{{$t.Description}}</td></tr>{{end}}
     {{if $t.Merchant}}<tr><th>Merchant</th><td>{{$t.Merchant}}</td></tr>{{end}}
-    {{if $t.NoCat}}<tr><th>Category</th><td><span class="tag no-cat">no category</span></td></tr>{{else if $t.Category}}<tr><th>Category</th><td>{{catIcon $t.Icon}} {{$t.Category}}</td></tr>{{end}}
+    {{if $t.NoCat}}<tr><th>Category</th><td><span class="tag no-cat">no category</span></td></tr>{{else if $t.Category}}<tr><th>Category</th><td>{{catIcon $t.Icon $t.Colour}} {{$t.Category}}</td></tr>{{end}}
     <tr><th>From → to</th><td>{{orDash $t.OriginLabel}} → {{orDash $t.DestLabel}}</td></tr>
     <tr><th>Status</th><td><span class="tag">{{$t.Status}}</span>{{if $t.Synced}}<span class="tag synced">synced ✓</span>{{end}}</td></tr>
     {{range $i, $n := $t.SyncedBy}}<tr><th>Synced by</th><td><span class="tag a-synced">synced by {{$n}}</span></td></tr>{{end}}
@@ -89,7 +89,7 @@
           <select name="category_id" required>
             <option value="">— choose —</option>
             {{range $t.Cats}}
-            <option value="{{.ID}}">{{if .Parent}}({{.Parent}}) {{end}}{{catIcon .Icon}} {{.Name}}</option>
+            <option value="{{.ID}}">{{if .Parent}}({{.Parent}}) {{end}}{{catIcon .Icon .Colour}} {{.Name}}</option>
             {{end}}
           </select>
         </label>

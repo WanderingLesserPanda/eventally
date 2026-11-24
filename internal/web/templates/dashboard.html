@@ -31,7 +31,7 @@
     <table style="width:100%;margin-top:.5rem">
       {{range .Cats}}
       <tr>
-        <td>{{catIcon .Icon}} {{.Name}}</td>
+        <td>{{catIcon .Icon .Colour}} {{.Name}}</td>
         <td class="money">{{money .Actual}}</td>
       </tr>
       {{end}}

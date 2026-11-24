@@ -79,7 +79,7 @@
 <div class="cat-detail-head">
   <div class="cat-detail-title">
     <span class="cat-detail-name">{{$d.Cat.Name}}</span>
-    {{catIcon $d.Cat.Icon}}
+    {{catIcon $d.Cat.Icon $d.Cat.Colour}}
   </div>
   <a class="btn-link" href="/categories/{{$d.Cat.ID}}" @click.prevent="openForm('edit', {{$d.Cat.ID}}, 0)">Edit Category</a>
 </div>
@@ -102,7 +102,7 @@
   {{if $d.Subs}}
   {{range $d.Subs}}
   <tr{{if not .Active}} class="archived"{{end}} data-child data-id="{{.ID}}" data-name="{{.Name}}">
-    <td class="cat-cell-name">{{catIcon .Icon}} {{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</td>
+    <td class="cat-cell-name">{{catIcon .Icon .Colour}} {{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</td>
     <td class="money">{{if .HasBudget}}{{money .Budget}}{{if eq .BudgetMode "part_of_parent"}} <span class="muted small">(of parent)</span>{{end}}{{else}}—{{end}}</td>
     <td class="cat-op">
       <a class="btn-link small" href="/categories/{{.ID}}" @click.prevent="openForm('edit', {{.ID}}, 0)">Edit</a>

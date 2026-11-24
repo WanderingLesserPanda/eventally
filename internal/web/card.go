@@ -59,6 +59,7 @@ type cardLine struct {
 	// Icon is the D32 glyph key ("" = unpicked; the template renders the
 	// credit-card default via the acctIcon function).
 	Icon          string
+	Colour        string // D36 hex tint ("" = no tint)
 	CreditLimit   money.Money
 	Outstanding   money.Money
 	Recorded      money.Money
@@ -639,7 +640,7 @@ func (a *App) handleCards(w http.ResponseWriter, r *http.Request) {
 	// standalones (aggregate self) or parents (roll up active children).
 	// Children are hidden from the list; they show under the parent page.
 	rows, err := a.Pool.Query(ctx, `
-		SELECT id, name, institution, COALESCE(card_type, ''), COALESCE(credit_limit, 0), COALESCE(icon, '')
+		SELECT id, name, institution, COALESCE(card_type, ''), COALESCE(credit_limit, 0), COALESCE(icon, ''), COALESCE(colour, '')
 		FROM account
 		WHERE household_id = $1 AND account_type = 'credit_card'
 		  AND parent_id IS NULL
@@ -653,7 +654,7 @@ func (a *App) handleCards(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c cardLine
 		if err := rows.Scan(&c.ID, &c.Name, &c.Institution, &c.CardType,
-			&c.CreditLimit, &c.Icon); err != nil {
+			&c.CreditLimit, &c.Icon, &c.Colour); err != nil {
 			http.Error(w, "scan card: "+err.Error(), 500)
 			return
 		}
