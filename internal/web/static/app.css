@@ -28,14 +28,13 @@ a { color: var(--accent); text-decoration: none; }
 }
 .sidepane .brand { display: block; font-weight: 700; font-size: 1.05rem; color: var(--accent); padding: 0 0.6rem 0.9rem; }
 .sidenav { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; }
-.sidenav a { display: block; padding: 0.42rem 0.6rem; border-radius: 8px; color: var(--muted); }
-.sidenav a:hover { color: var(--ink); background: var(--bg); }
-/* Active item: warm peach tint + accent bar (per the adopted boards). */
-.sidenav a.active { position: relative; background: var(--band); color: var(--accent); font-weight: 600; }
-.sidenav a.active::before {
-  content: ""; position: absolute; left: 0; top: 0.35rem; bottom: 0.35rem;
-  width: 3px; border-radius: 2px; background: var(--accent);
-}
+/* D39: the side nav shares the Categories-pane highlight treatment (the
+   settled D38 look): the active page gets the flat cream tint with the
+   full-height 3px accent bar (border-left, same geometry as .cat-row),
+   hover is a flat subtle tint - no border radius on either state. */
+.sidenav a { display: block; padding: 0.42rem 0.6rem; border-radius: 8px; border-left: 3px solid transparent; color: var(--muted); }
+.sidenav a:hover { color: var(--ink); background: var(--bg); border-radius: 0; }
+.sidenav a.active { background: var(--sel); border-left-color: var(--accent); color: var(--accent); border-radius: 0; }
 .side-foot { padding: 0.6rem 0.6rem 0; border-top: 1px solid var(--line); margin-top: 1rem; }
 .signout-link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; }
 .signout-link:hover { color: var(--accent); }
