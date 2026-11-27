@@ -304,7 +304,7 @@ func TestD34ToggleRoundTrip(t *testing.T) {
 
 	// Toggle OFF (ret=settings): row deleted; the existing copy is untouched.
 	rec = d34Toggle(t, a, ctx, sessU1, s.H2, false, "settings")
-	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "tab=sync") {
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "/settings/sync") {
 		t.Fatalf("toggle-off (settings): status %d loc %q", rec.Code, rec.Header().Get("Location"))
 	}
 	if n := d34Int(t, pool, `SELECT count(*) FROM auto_sync WHERE member_user_id=$1`, s.U); n != 0 {
@@ -933,7 +933,7 @@ func TestD34SettingsSyncRenders(t *testing.T) {
 	d34Mapping(t, a, ctx, sessU1, s.H2, s.CatH2, s.CatH1)
 
 	rec := httptest.NewRecorder()
-	a.handleSettingsSync(rec, d33GET(t, ctx, sessU1, "/settings?tab=sync"))
+	a.handleSettingsSync(rec, d33GET(t, ctx, sessU1, "/settings/sync"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("settings sync GET: status %d body %q", rec.Code, rec.Body.String())
 	}

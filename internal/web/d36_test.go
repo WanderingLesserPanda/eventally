@@ -197,7 +197,7 @@ func TestD36_CategoryColourPlainMember(t *testing.T) {
 			"colour":            {colour},
 		}
 		w := httptest.NewRecorder()
-		a.handleCategoryCreate(w, d30Req(t, ctx, sess, "/categories/create", 0, form))
+		a.handleCategoryCreate(w, d30Req(t, ctx, sess, "/settings/categories/create", 0, form))
 		if w.Code != http.StatusSeeOther {
 			t.Fatalf("create %q: got %d, want 303", name, w.Code)
 		}
@@ -227,7 +227,7 @@ func TestD36_InvalidHexSilentlyCleared(t *testing.T) {
 		"colour":            {"#GG0000"},
 	}
 	w := httptest.NewRecorder()
-	a.handleCategoryCreate(w, d30Req(t, ctx, sess, "/categories/create", 0, form))
+	a.handleCategoryCreate(w, d30Req(t, ctx, sess, "/settings/categories/create", 0, form))
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("create with invalid colour: got %d, want 303 (row still created)", w.Code)
 	}

@@ -163,7 +163,7 @@ func TestD32CategoryIconAnyMember(t *testing.T) {
 	// A PLAIN MEMBER creates a category with a registry icon.
 	form := url.Values{"name": {"Coffee"}, "transaction_class": {"expense"}, "icon": {"la-coffee"}}
 	rec := httptest.NewRecorder()
-	a.handleCategoryCreate(rec, d30Req(t, ctx, mm, "/categories", 0, form))
+	a.handleCategoryCreate(rec, d30Req(t, ctx, mm, "/settings/categories", 0, form))
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("member category create: %d, want 303; body: %s", rec.Code, rec.Body.String()[:min(len(rec.Body.String()), 300)])
 	}
@@ -181,7 +181,7 @@ func TestD32CategoryIconAnyMember(t *testing.T) {
 	// An unknown key is rejected: form re-renders, no row is created.
 	bad := url.Values{"name": {"Ghost"}, "transaction_class": {"expense"}, "icon": {"la-bogus"}}
 	recBad := httptest.NewRecorder()
-	a.handleCategoryCreate(recBad, d30Req(t, ctx, mm, "/categories", 0, bad))
+	a.handleCategoryCreate(recBad, d30Req(t, ctx, mm, "/settings/categories", 0, bad))
 	if recBad.Code != http.StatusOK || !strings.Contains(recBad.Body.String(), "Unknown icon.") {
 		t.Fatalf("unknown icon: code %d, want 200 + 'Unknown icon.'", recBad.Code)
 	}
@@ -199,7 +199,7 @@ func TestD32CategoryIconAnyMember(t *testing.T) {
 		"budgetable": {"on"},
 	}
 	recEdit := httptest.NewRecorder()
-	a.handleCategoryEdit(recEdit, d30Req(t, ctx, mm, "/categories/"+strconv.FormatInt(catID, 10), catID, edit))
+	a.handleCategoryEdit(recEdit, d30Req(t, ctx, mm, "/settings/categories/"+strconv.FormatInt(catID, 10), catID, edit))
 	if recEdit.Code != http.StatusSeeOther {
 		t.Fatalf("member category edit: %d, want 303", recEdit.Code)
 	}
@@ -212,7 +212,7 @@ func TestD32CategoryIconAnyMember(t *testing.T) {
 
 	// The form renders the picker: 296 glyph cells + the "No icon" row,
 	// preselected with the stored key, and the Line Awesome CSS is linked.
-	recGet := d32Get(t, a, om, a.handleCategoryEdit, "/categories/"+strconv.FormatInt(catID, 10), catID)
+	recGet := d32Get(t, a, om, a.handleCategoryEdit, "/settings/categories/"+strconv.FormatInt(catID, 10), catID)
 	if recGet.Code != http.StatusOK {
 		t.Fatalf("category form GET: %d", recGet.Code)
 	}

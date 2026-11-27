@@ -99,7 +99,7 @@ func d35CatMode(t *testing.T, pool *pgxpool.Pool, hh int64, name, class string, 
 // (the cat_detail pane with the Total Budget line and the envelope note).
 func d35Detail(t *testing.T, a *App, sess *auth.Session, id int64) string {
 	t.Helper()
-	rec := d32Get(t, a, sess, a.catDetailFragment, "/categories/detail?id="+strconv.FormatInt(id, 10), 0)
+	rec := d32Get(t, a, sess, a.catDetailFragment, "/settings/categories/detail?id="+strconv.FormatInt(id, 10), 0)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET detail id=%d: HTTP %d, body: %s", id, rec.Code, rec.Body.String())
 	}
@@ -110,7 +110,7 @@ func d35Detail(t *testing.T, a *App, sess *auth.Session, id int64) string {
 // HTML (failing the test on a non-200).
 func d35Page(t *testing.T, a *App, sess *auth.Session, query string) string {
 	t.Helper()
-	rec := d32Get(t, a, sess, a.listCategories, "/categories"+query, 0)
+	rec := d32Get(t, a, sess, a.listCategories, "/settings/categories"+query, 0)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /categories%s: HTTP %d, body: %s", query, rec.Code, rec.Body.String())
 	}
@@ -274,7 +274,7 @@ func TestD35FragmentEndpoints(t *testing.T) {
 	food := d35Cat(t, pool, sess.Household, "Food", "expense", 0, "1000", 0)
 	d35Cat(t, pool, sess.Household, "Groceries", "expense", food, "1500", 0)
 
-	rec := d32Get(t, a, sess, a.catPaneFragment, "/categories/pane?class=expense", 0)
+	rec := d32Get(t, a, sess, a.catPaneFragment, "/settings/categories/pane?class=expense", 0)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Food") ||
 		!strings.Contains(rec.Body.String(), "cat-count") {
 		t.Fatalf("pane fragment: HTTP %d body %s", rec.Code, rec.Body.String())
@@ -284,14 +284,14 @@ func TestD35FragmentEndpoints(t *testing.T) {
 		t.Errorf("pane fragment should be unwrapped (no layout/topbar)")
 	}
 
-	rec = d32Get(t, a, sess, a.catDetailFragment, "/categories/detail?id="+strconv.FormatInt(food, 10), 0)
+	rec = d32Get(t, a, sess, a.catDetailFragment, "/settings/categories/detail?id="+strconv.FormatInt(food, 10), 0)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "cat-subtable") ||
 		!strings.Contains(rec.Body.String(), "2,500.00") {
 		t.Fatalf("detail fragment: HTTP %d body %s", rec.Code, rec.Body.String())
 	}
 
 	// A bad id 404s with the empty-detail nudge.
-	rec = d32Get(t, a, sess, a.catDetailFragment, "/categories/detail?id=99999", 0)
+	rec = d32Get(t, a, sess, a.catDetailFragment, "/settings/categories/detail?id=99999", 0)
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "Please add a category first.") {
 		t.Fatalf("detail fragment for a bad id: HTTP %d body %s", rec.Code, rec.Body.String())
 	}
@@ -305,7 +305,7 @@ func TestD35ArchiveUnarchiveRoundTrip(t *testing.T) {
 	id := d35Cat(t, pool, sess.Household, "Food", "expense", 0, "", 0)
 
 	rec := httptest.NewRecorder()
-	a.handleCategoryArchive(rec, d30Req(t, ctx, sess, "/categories/"+strconv.FormatInt(id, 10)+"/archive", id, nil))
+	a.handleCategoryArchive(rec, d30Req(t, ctx, sess, "/settings/categories/"+strconv.FormatInt(id, 10)+"/archive", id, nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
 		t.Fatalf("archive: HTTP %d body %s", rec.Code, rec.Body.String())
 	}
@@ -318,7 +318,7 @@ func TestD35ArchiveUnarchiveRoundTrip(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	a.handleCategoryUnarchive(rec, d30Req(t, ctx, sess, "/categories/"+strconv.FormatInt(id, 10)+"/unarchive", id, nil))
+	a.handleCategoryUnarchive(rec, d30Req(t, ctx, sess, "/settings/categories/"+strconv.FormatInt(id, 10)+"/unarchive", id, nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
 		t.Fatalf("unarchive: HTTP %d body %s", rec.Code, rec.Body.String())
 	}
@@ -337,7 +337,7 @@ func TestD35CreateParentPreselect(t *testing.T) {
 	parent := d35Cat(t, pool, sess.Household, "Food", "expense", 0, "", 0)
 
 	rec := d32Get(t, a, sess, a.handleCategoryCreate,
-		"/categories/new?parent="+strconv.FormatInt(parent, 10)+"&class=expense", 0)
+		"/settings/categories/new?parent="+strconv.FormatInt(parent, 10)+"&class=expense", 0)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /categories/new: HTTP %d", rec.Code)
 	}
@@ -363,7 +363,7 @@ func TestD35SaveSortRoundTrip(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	form := url.Values{"class": {"expense"}, "level": {"top"}, "ids": {fmt.Sprintf("%d,%d,%d", cID, aID, bID)}}
-	a.handleCategorySort(rec, d30Req(t, ctx, sess, "/categories/sort", 0, form))
+	a.handleCategorySort(rec, d30Req(t, ctx, sess, "/settings/categories/sort", 0, form))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
 		t.Fatalf("top sort: HTTP %d body %s", rec.Code, rec.Body.String())
 	}
@@ -378,7 +378,7 @@ func TestD35SaveSortRoundTrip(t *testing.T) {
 	z := d35Cat(t, pool, sess.Household, "Z", "expense", p, "", 2)
 	rec = httptest.NewRecorder()
 	form = url.Values{"class": {"expense"}, "level": {"sub"}, "parent_id": {fmt.Sprintf("%d", p)}, "ids": {fmt.Sprintf("%d,%d,%d", y, z, x)}}
-	a.handleCategorySort(rec, d30Req(t, ctx, sess, "/categories/sort", 0, form))
+	a.handleCategorySort(rec, d30Req(t, ctx, sess, "/settings/categories/sort", 0, form))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
 		t.Fatalf("sub sort: HTTP %d body %s", rec.Code, rec.Body.String())
 	}
@@ -389,7 +389,7 @@ func TestD35SaveSortRoundTrip(t *testing.T) {
 	// A stale top-level list (categories dropped) is a 400, not a partial write.
 	rec = httptest.NewRecorder()
 	form = url.Values{"class": {"expense"}, "level": {"top"}, "ids": {fmt.Sprintf("%d,%d", aID, bID)}}
-	a.handleCategorySort(rec, d30Req(t, ctx, sess, "/categories/sort", 0, form))
+	a.handleCategorySort(rec, d30Req(t, ctx, sess, "/settings/categories/sort", 0, form))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("stale top sort should be 400, got %d", rec.Code)
 	}
@@ -460,7 +460,7 @@ func TestD35FormFragment(t *testing.T) {
 	parent := d35Cat(t, pool, sess.Household, "Food", "expense", 0, "1000", 0)
 
 	rec := d35FetchGet(t, a, sess, a.handleCategoryCreate,
-		"/categories/new?class=income&parent="+strconv.FormatInt(parent, 10), 0)
+		"/settings/categories/new?class=income&parent="+strconv.FormatInt(parent, 10), 0)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("new form fragment: HTTP %d", rec.Code)
 	}
@@ -482,7 +482,7 @@ func TestD35FormFragment(t *testing.T) {
 	}
 
 	eid := d35Cat(t, pool, sess.Household, "Renamed", "expense", 0, "2500", 1)
-	rec = d35FetchGet(t, a, sess, a.handleCategoryEdit, "/categories/"+strconv.FormatInt(eid, 10), eid)
+	rec = d35FetchGet(t, a, sess, a.handleCategoryEdit, "/settings/categories/"+strconv.FormatInt(eid, 10), eid)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("edit form fragment: HTTP %d", rec.Code)
 	}
@@ -502,7 +502,7 @@ func TestD35InPageCreate(t *testing.T) {
 		"name": {"Coffee"}, "transaction_class": {"expense"}, "parent_id": {""},
 		"budget": {"75"}, "budgetable": {"on"}, "icon": {""},
 	}
-	rec := d35FetchPost(t, a, sess, a.handleCategoryCreate, "/categories", 0, form)
+	rec := d35FetchPost(t, a, sess, a.handleCategoryCreate, "/settings/categories", 0, form)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
 		t.Fatalf("in-page create: HTTP %d body %s", rec.Code, rec.Body.String())
 	}
@@ -515,7 +515,7 @@ func TestD35InPageCreate(t *testing.T) {
 	}
 
 	bad := url.Values{"name": {""}, "transaction_class": {"expense"}, "parent_id": {""}, "budget": {""}, "icon": {""}}
-	rec = d35FetchPost(t, a, sess, a.handleCategoryCreate, "/categories", 0, bad)
+	rec = d35FetchPost(t, a, sess, a.handleCategoryCreate, "/settings/categories", 0, bad)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("in-page create error: HTTP %d", rec.Code)
 	}
@@ -536,7 +536,7 @@ func TestD35InPageEdit(t *testing.T) {
 		"name": {"NewName"}, "transaction_class": {"expense"}, "parent_id": {""},
 		"budget": {"900"}, "budgetable": {"on"}, "icon": {""},
 	}
-	rec := d35FetchPost(t, a, sess, a.handleCategoryEdit, "/categories/"+strconv.FormatInt(id, 10), id, form)
+	rec := d35FetchPost(t, a, sess, a.handleCategoryEdit, "/settings/categories/"+strconv.FormatInt(id, 10), id, form)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
 		t.Fatalf("in-page edit: HTTP %d body %s", rec.Code, rec.Body.String())
 	}
@@ -632,7 +632,7 @@ func TestD35FormBudgetModePrefill(t *testing.T) {
 
 	editForm := func(id int64) string {
 		t.Helper()
-		rec := d32Get(t, a, sess, a.handleCategoryEdit, "/categories/"+strconv.FormatInt(id, 10), id)
+		rec := d32Get(t, a, sess, a.handleCategoryEdit, "/settings/categories/"+strconv.FormatInt(id, 10), id)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("edit form id=%d: HTTP %d body %s", id, rec.Code, rec.Body.String())
 		}
