@@ -139,12 +139,12 @@ CUSTOM="123abc"   # valid 6-hex, deliberately NOT in the 16-palette
 
 # ---- 1. the Colour popover is present on both forms ----
 echo "==> 1. Colour popover markup on both forms"
-has u /categories/new 'colourPicker'
-has u /categories/new 'name="colour"'
-has u /categories/new 'No colour (default)'
-has u /categories/new 'type="color"'
-has u /categories/new 'colour-hex'
-NSW="$(page u /categories/new | grep -o 'class="colour-swatch"' | wc -l | tr -d ' ' || true)"
+has u /settings/categories/new 'colourPicker'
+has u /settings/categories/new 'name="colour"'
+has u /settings/categories/new 'No colour (default)'
+has u /settings/categories/new 'type="color"'
+has u /settings/categories/new 'colour-hex'
+NSW="$(page u /settings/categories/new | grep -o 'class="colour-swatch"' | wc -l | tr -d ' ' || true)"
 [[ "$NSW" == "16" ]] || fail "category form swatches: $NSW, want 16"
 has u /accounts/new 'colourPicker'
 has u /accounts/new 'name="colour"'
@@ -154,29 +154,29 @@ NSWA="$(page u /accounts/new | grep -o 'class="colour-swatch"' | wc -l | tr -d '
 
 # ---- 2. plain member (m) creates a category with a PRESET colour ----
 echo "==> 2. plain member creates a category with a preset colour"
-code="$(post m /categories --csrf-src=/categories/new \
+code="$(post m /settings/categories --csrf-src=/settings/categories/new \
   --data-urlencode "name=Preset Cat" --data-urlencode "transaction_class=expense" \
   --data-urlencode "colour=${PRESET}")"
 [[ "$code" == "303" ]] || fail "category create (preset): HTTP $code"
 CID="$(sql "SELECT id FROM category WHERE household_id=1 AND name='Preset Cat'")"
 [[ -n "$CID" ]] || fail "preset category not created"
 [[ "$(sql "SELECT colour FROM category WHERE id=$CID")" == "$PRESET" ]] || fail "preset colour not stored"
-has u /categories "style=\"color:#${PRESET}\""
+has u /settings/categories "style=\"color:#${PRESET}\""
 
 # ---- 3. a CUSTOM hex (not in the palette) is accepted identically ----
 echo "==> 3. custom hex (not in palette) is accepted"
-code="$(post m /categories --csrf-src=/categories/new \
+code="$(post m /settings/categories --csrf-src=/settings/categories/new \
   --data-urlencode "name=Custom Cat" --data-urlencode "transaction_class=expense" \
   --data-urlencode "colour=${CUSTOM}")"
 [[ "$code" == "303" ]] || fail "category create (custom): HTTP $code"
 CID2="$(sql "SELECT id FROM category WHERE household_id=1 AND name='Custom Cat'")"
 [[ -n "$CID2" ]] || fail "custom category not created"
 [[ "$(sql "SELECT colour FROM category WHERE id=$CID2")" == "$CUSTOM" ]] || fail "custom colour not stored"
-has u /categories "style=\"color:#${CUSTOM}\""
+has u /settings/categories "style=\"color:#${CUSTOM}\""
 
 # ---- 4. an INVALID hex: row is created, colour stored NULL (ADR-0013) ----
 echo "==> 4. invalid hex is rejected (row created, colour NULL)"
-code="$(post m /categories --csrf-src=/categories/new \
+code="$(post m /settings/categories --csrf-src=/settings/categories/new \
   --data-urlencode "name=Bad Cat" --data-urlencode "transaction_class=expense" \
   --data-urlencode "colour=#GG0000")"
 [[ "$code" == "303" ]] || fail "category create (bad hex): HTTP $code"
@@ -187,7 +187,7 @@ CID3="$(sql "SELECT id FROM category WHERE household_id=1 AND name='Bad Cat'")"
 
 # ---- 5. clearing the colour returns NULL (glyph falls back to inherited) ----
 echo "==> 5. clearing the colour stores NULL"
-code="$(post m "/categories/$CID" --csrf-src="/categories/$CID" \
+code="$(post m "/settings/categories/$CID" --csrf-src="/settings/categories/$CID" \
   --data-urlencode "name=Preset Cat" --data-urlencode "transaction_class=expense" \
   --data-urlencode "colour=")"
 [[ "$code" == "303" ]] || fail "category edit (clear): HTTP $code"

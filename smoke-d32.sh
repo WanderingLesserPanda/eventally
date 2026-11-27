@@ -206,7 +206,7 @@ code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/static/lineawesome/LICENSE
 [[ "$code" == "200" ]] || fail "LICENSE.txt: HTTP $code"
 
 echo "==> 2. category form: picker markup (296 glyphs + No-icon row + CSS link)"
-CATFORM="$(page u /categories/new)"
+CATFORM="$(page u /settings/categories/new)"
 # Note: bash string matching, not `echo | grep -q` — the page is >64KB and
 # grep -q's early exit would SIGPIPE the writer under pipefail.
 [[ "$CATFORM" == *'/static/lineawesome/css/line-awesome.min.css'* ]] || fail "category form: LA css link missing"
@@ -217,13 +217,13 @@ CELLS="$(echo "$CATFORM" | grep -o 'class="icon-cell" data-key="la-' | wc -l)"
 [[ "$CATFORM" == *"Alpine.data('iconPicker'"* ]] || fail "picker component not registered in the page"
 
 echo "==> 3. plain member sets a category icon via the form (no grant gate)"
-code="$(post m /categories --csrf-src=/categories/new \
+code="$(post m /settings/categories --csrf-src=/settings/categories/new \
   --data-urlencode "name=Snacks" --data-urlencode "transaction_class=expense" \
   --data-urlencode "icon=la-pizza-slice")"
 [[ "$code" == "303" ]] || fail "member category create: HTTP $code"
 [[ "$(sql "SELECT icon FROM category WHERE name='Snacks'")" == "la-pizza-slice" ]] || fail "icon not persisted"
 # Brand-family glyph (Line Awesome Brands font) — must be storable too.
-code="$(post m /categories --csrf-src=/categories/new \
+code="$(post m /settings/categories --csrf-src=/settings/categories/new \
   --data-urlencode "name=Crypto" --data-urlencode "transaction_class=expense" \
   --data-urlencode "icon=la-ethereum")"
 [[ "$code" == "303" ]] || fail "member category create (brand icon): HTTP $code"
@@ -231,14 +231,14 @@ code="$(post m /categories --csrf-src=/categories/new \
 CRYPTO="$(sql "SELECT id FROM category WHERE name='Crypto'")"
 
 echo "==> 4. unknown icon key rejected (form error, no row)"
-body="$(curl -s -b "$JARS/m" --data-urlencode "csrf=$(csrf m /categories/new)" \
+body="$(curl -s -b "$JARS/m" --data-urlencode "csrf=$(csrf m /settings/categories/new)" \
   --data-urlencode "name=Ghost" --data-urlencode "transaction_class=expense" \
-  --data-urlencode "icon=la-bogus" "$BASE/categories")"
+  --data-urlencode "icon=la-bogus" "$BASE/settings/categories")"
 [[ "$body" == *'Unknown icon.'* ]] || fail "unknown icon not rejected"
 [[ "$(sql "SELECT count(*) FROM category WHERE name='Ghost'")" == "0" ]] || fail "rejected key created a row"
 
 echo "==> 5. plain member edits the icon"
-code="$(post m "/categories/$COFFEE" --csrf-src="/categories/$COFFEE" \
+code="$(post m "/settings/categories/$COFFEE" --csrf-src="/settings/categories/$COFFEE" \
   --data-urlencode "name=Coffee" --data-urlencode "transaction_class=expense" \
   --data-urlencode "budgetable=on" --data-urlencode "icon=la-mug-hot")"
 [[ "$code" == "303" ]] || fail "member category edit: HTTP $code"
@@ -298,8 +298,8 @@ has u /txns/new 'la-mug-hot'
 # Brand glyphs render with the lab style class (Line Awesome Brands font) —
 # regression for blank ethereum/apple-pay in the live image (2026-11-20):
 # the solid Free font has no brand codepoints, so the class must select lab.
-has u /categories/new 'class="lab la-ethereum"'
-has u "/categories/$CRYPTO" "iconPicker('la-ethereum', 'lab')"
+has u /settings/categories/new 'class="lab la-ethereum"'
+has u "/settings/categories/$CRYPTO" "iconPicker('la-ethereum', 'lab')"
 # No emoji glyphs anywhere on the accounts grid (grep -P without -q:
 # -q would early-exit and SIGPIPE the writer under pipefail on big pages).
 ACCPAGE="$(page u /accounts)"

@@ -203,7 +203,7 @@ SID="$(sql "SELECT id FROM \"transaction\" WHERE household_id=1 AND sync_source_
 [[ "$(sql "SELECT COALESCE(category_id,0) FROM \"transaction\" WHERE id=$SID")" == "0" ]] || fail "unexpected category on unmapped copy"
 
 echo "==> 4. map a category (H2 Drink -> H1 Coffee)"
-code="$(post u /settings/mapping --csrf-src="/settings?tab=sync" --data-urlencode "source=2:$DRINKH2" \
+code="$(post u /settings/mapping --csrf-src="/settings/sync" --data-urlencode "source=2:$DRINKH2" \
   --data-urlencode "target_category_id=$COFFEE")"
 [[ "$code" == "303" ]] || fail "mapping create: HTTP $code"
 mrow="$(sql "SELECT target_category_id FROM category_mapping WHERE household_id=1 AND source_household_id=2 AND source_category_id=$DRINKH2")"
