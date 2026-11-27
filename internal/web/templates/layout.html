@@ -125,7 +125,7 @@ document.addEventListener('alpine:init', () => {
       document.querySelector('.cats').dataset.class = c;
       document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.class === c));
       this.topOrder = null;
-      this.pane().innerHTML = await this.fetchText('/categories/pane?class=' + encodeURIComponent(c));
+      this.pane().innerHTML = await this.fetchText('/settings/categories/pane?class=' + encodeURIComponent(c));
       this.topClean = this.leftIDs();
       const first = this.pane().querySelector('.cat-row');
       if (first) return this.loadDetail(first.dataset.id);
@@ -137,7 +137,7 @@ document.addEventListener('alpine:init', () => {
       this.selected = String(id);
       document.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
       this.subOrder = null;
-      this.detail().innerHTML = await this.fetchText('/categories/detail?id=' + encodeURIComponent(id));
+      this.detail().innerHTML = await this.fetchText('/settings/categories/detail?id=' + encodeURIComponent(id));
       this.subClean = this.subIDs();
     },
     select(id) { return this.loadDetail(id); },
@@ -150,8 +150,8 @@ document.addEventListener('alpine:init', () => {
     closeForm() { this.formOpen = false; },
     async openForm(mode, id, parent) {
       const url = (mode === 'edit')
-        ? '/categories/' + encodeURIComponent(id)
-        : '/categories/new?class=' + encodeURIComponent(this.cls) + (parent ? '&parent=' + encodeURIComponent(parent) : '');
+        ? '/settings/categories/' + encodeURIComponent(id)
+        : '/settings/categories/new?class=' + encodeURIComponent(this.cls) + (parent ? '&parent=' + encodeURIComponent(parent) : '');
       this.formOpen = true;
       const host = this.formHost();
       host.innerHTML = '<p class="muted small">Loading…</p>';
@@ -164,7 +164,7 @@ document.addEventListener('alpine:init', () => {
     wireForm(form) {
       if (!form) return;
       form.onsubmit = (e) => { e.preventDefault(); return this.submitForm(form); };
-      const cancel = form.querySelector('a[href="/categories"]');
+      const cancel = form.querySelector('a[href="/settings/categories"]');
       if (cancel) cancel.onclick = (e) => { e.preventDefault(); this.closeForm(); };
     },
     async submitForm(form) {
@@ -470,8 +470,8 @@ document.addEventListener('alpine:init', () => {
     // category's children); each renumbers sort_order 0..N. Then re-confirm.
     async saveSort() {
       const jobs = [];
-      if (this.topOrder) jobs.push(this.post('/categories/sort', { class: this.cls, level: 'top', ids: this.topOrder.join(',') }));
-      if (this.subOrder) jobs.push(this.post('/categories/sort', { class: this.cls, level: 'sub', parent_id: this.selected, ids: this.subOrder.join(',') }));
+      if (this.topOrder) jobs.push(this.post('/settings/categories/sort', { class: this.cls, level: 'top', ids: this.topOrder.join(',') }));
+      if (this.subOrder) jobs.push(this.post('/settings/categories/sort', { class: this.cls, level: 'sub', parent_id: this.selected, ids: this.subOrder.join(',') }));
       if (!jobs.length) return;
       await Promise.all(jobs);
       this.topOrder = null; this.subOrder = null;
@@ -481,23 +481,23 @@ document.addEventListener('alpine:init', () => {
     archiveSub(evt, id) {
       const name = evt.target.dataset.name || '';
       if (!confirm('Archive ' + name + '? It stays in history. You can unarchive it later.')) return;
-      return this.post('/categories/' + id + '/archive').then(() => this.loadDetail(this.selected));
+      return this.post('/settings/categories/' + id + '/archive').then(() => this.loadDetail(this.selected));
     },
-    unarchiveSub(id) { return this.post('/categories/' + id + '/unarchive').then(() => this.loadDetail(this.selected)); },
+    unarchiveSub(id) { return this.post('/settings/categories/' + id + '/unarchive').then(() => this.loadDetail(this.selected)); },
     // Archive / unarchive from the Edit modal (top-level categories only; the
     // subcategory archive stays inline in the sub-table). Confirm, POST, close
     // the modal, and re-fetch both panes (the row demotes into the Archived group).
     archiveFromModal(evt, id) {
       const name = evt.target.dataset.name || '';
       if (!confirm('Archive ' + name + '? It stays in history. You can unarchive it later.')) return;
-      return this.post('/categories/' + id + '/archive').then(() => { this.closeForm(); return this.reswap(); });
+      return this.post('/settings/categories/' + id + '/archive').then(() => { this.closeForm(); return this.reswap(); });
     },
-    unarchiveFromModal(id) { return this.post('/categories/' + id + '/unarchive').then(() => { this.closeForm(); return this.reswap(); }); },
+    unarchiveFromModal(id) { return this.post('/settings/categories/' + id + '/unarchive').then(() => { this.closeForm(); return this.reswap(); }); },
     // Re-fetch the left pane for the active class and the detail for the
     // currently selected category, re-applying the selection.
     async reswap() {
       this.topOrder = null; this.subOrder = null;
-      this.pane().innerHTML = await this.fetchText('/categories/pane?class=' + encodeURIComponent(this.cls));
+      this.pane().innerHTML = await this.fetchText('/settings/categories/pane?class=' + encodeURIComponent(this.cls));
       this.topClean = this.leftIDs();
       document.querySelectorAll('#cat-pane .cat-row').forEach(r => r.classList.toggle('selected', r.dataset.id === this.selected));
       if (this.selected) return this.loadDetail(this.selected);

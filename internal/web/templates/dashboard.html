@@ -84,7 +84,7 @@
     {{if gt .BudgetTotal 0}}
     <p class="muted small">Spent <strong>{{money .ActualOnBudget}}</strong> of <strong>{{money .BudgetTotal}}</strong> budgeted — {{money .BudgetRemaining}} remaining.</p>
     {{else}}
-    <p class="muted small" style="margin-top:.5rem">No budgets set. Set <code>budget_per_month</code> on expense categories in <a href="/categories">Categories</a>.</p>
+    <p class="muted small">No budgets set. Set <code>budget_per_month</code> on expense categories in <a href="/settings/categories">Categories</a>.</p>
     {{end}}
   </div>
 

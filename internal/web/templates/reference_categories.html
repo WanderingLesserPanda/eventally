@@ -19,7 +19,7 @@
     </div>
     <div class="cat-toolbar-actions">
       <button type="button" class="btn" x-show="sortDirty()" x-cloak @click="saveSort()">Save Sort</button>
-      <a class="btn-primary" href="/categories/new" @click.prevent="openForm('new', 0, 0)">＋ Add Category</a>
+      <a class="btn-primary" href="/settings/categories/new" @click.prevent="openForm('new', 0, 0)">＋ Add Category</a>
     </div>
   </div>
 
@@ -80,7 +80,7 @@
     <span class="cat-detail-name">{{$d.Cat.Name}}</span>
     {{catIcon $d.Cat.Icon $d.Cat.Colour}}
   </div>
-  <a class="btn-link" href="/categories/{{$d.Cat.ID}}" @click.prevent="openForm('edit', {{$d.Cat.ID}}, 0)">Edit Category</a>
+  <a class="btn-link" href="/settings/categories/{{$d.Cat.ID}}" @click.prevent="openForm('edit', {{$d.Cat.ID}}, 0)">Edit Category</a>
 </div>
 
 <div class="cat-total">
@@ -104,7 +104,7 @@
     <td class="cat-cell-name">{{catIcon .Icon .Colour}} {{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</td>
     <td class="money">{{if .HasBudget}}{{money .Budget}}{{if eq .BudgetMode "part_of_parent"}} <span class="muted small">(of parent)</span>{{end}}{{else}}—{{end}}</td>
     <td class="cat-op">
-      <a class="btn-link small" href="/categories/{{.ID}}" @click.prevent="openForm('edit', {{.ID}}, 0)">Edit</a>
+      <a class="btn-link small" href="/settings/categories/{{.ID}}" @click.prevent="openForm('edit', {{.ID}}, 0)">Edit</a>
       {{if .Active}}<button type="button" class="btn-link small" data-name="{{.Name}}" @click="archiveSub($event, {{.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveSub({{.ID}})">Unarchive</button>{{end}}
       <i class="la la-braille cat-grip" title="Reorder" tabindex="0" role="button"
          aria-roledescription="Reorder" @pointerdown="gripDown($event)" @keydown="gripKey($event)"></i>
@@ -115,7 +115,7 @@
   <tr><td colspan="3" class="cat-subempty">No subcategories yet.</td></tr>
   {{end}}
 </table>
-<a class="cat-add-sub btn-link" href="/categories/new?parent={{$d.Cat.ID}}" @click.prevent="openForm('new', 0, {{$d.Cat.ID}})">＋ Add Subcategory</a>
+<a class="cat-add-sub btn-link" href="/settings/categories/new?parent={{$d.Cat.ID}}" @click.prevent="openForm('new', 0, {{$d.Cat.ID}})">＋ Add Subcategory</a>
 {{else}}
 <p class="cat-empty">Please add a category first.</p>
 {{end}}

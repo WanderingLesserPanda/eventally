@@ -13,7 +13,7 @@
 {{define "cat_form"}}
 <div x-data="Object.assign(iconPicker('{{.F.Icon}}', '{{iconStyle .F.Icon}}'), colourPicker('{{.F.Colour}}'))">
   {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
-  <form method="post" action="{{if .Editing}}/categories/{{.F.ID}}{{else}}/categories{{end}}">
+  <form method="post" action="{{if .Editing}}/settings/categories/{{.F.ID}}{{else}}/settings/categories{{end}}">
     {{template "csrf" .}}
     <div x-data="{ pid: '{{if .F.ParentID}}{{.F.ParentID}}{{end}}' }">
     <div class="form-grid">
@@ -144,7 +144,7 @@
     <input type="hidden" name="colour" x-ref="colourInput" :value="cKey">
     <div class="form-actions">
       <button type="submit" class="btn-primary">{{if .Editing}}Save{{else}}Create{{end}}</button>
-      <a class="btn" href="/categories">Cancel</a>
+      <a class="btn" href="/settings/categories">Cancel</a>
     </div>
     {{if and .Editing (eq .F.ParentID 0)}}
     <div class="cat-form-archive">
