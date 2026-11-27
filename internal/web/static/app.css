@@ -476,8 +476,11 @@ a.hh-item { cursor: pointer; }
 /* D38 feedback r2: flex: 0 0 1px pins the divider so it can never be
    squeezed to 0 by flex overflow (a shrinkable 1px flex item collapsed
    whenever the detail pane's content was wider than the remaining space,
-   making the line vanish). */
-.cat-div-v { flex: 0 0 1px; background: var(--line); margin: 0 1.2rem; }
+   making the line vanish). D38 feedback r3: the negative top margin runs
+   the line UP through the toolbar's margin-bottom so its top edge meets
+   the horizontal rule under the tabs exactly - seamless junction
+   (reference: the user's To-be Categories image, verified at 0px gap). */
+.cat-div-v { flex: 0 0 1px; background: var(--line); margin: -0.9rem 1.2rem 0; }
 .cat-detail { flex: 1 1 auto; min-width: 0; }
 .cat-list { list-style: none; margin: 0; padding: 0; }
 .cat-row {
@@ -490,10 +493,14 @@ a.hh-item { cursor: pointer; }
 .cat-row .cat-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .cat-row:hover { background: var(--bg); }
 /* D38: the selected row is flat (no radius), cream tint, accent bar on the
-   far left. D38 feedback r2: the row keeps the SAME width as the other rows
-   (the earlier edge-to-divider extension read as the row "growing" on click
-   and covered the divider, so it was dropped). */
-.cat-row.selected { background: var(--sel); border-left-color: var(--accent); color: var(--accent); border-radius: 0; }
+   far left, and the highlight runs ALL THE WAY to the vertical divider -
+   zero gap, never covering the line (with the divider pinned at 1px, the
+   -1.2rem lands exactly on the divider's left edge; reference: the user's
+   To-be Categories image, verified 0px gap). D38 feedback r2 briefly
+   dropped the extension (it read as the row "growing" while the divider
+   was collapsed to 0px and invisible); feedback r3 restored it - the
+   growing appearance was the missing divider, not the extension. */
+.cat-row.selected { background: var(--sel); border-left-color: var(--accent); color: var(--accent); border-radius: 0; margin-right: -1.2rem; }
 .cat-row.selected .cat-count { color: var(--accent); opacity: 0.7; }
 .cat-row.archived { opacity: 0.55; }
 .cat-empty { color: var(--muted); padding: 0.6rem 0.2rem; }
@@ -505,7 +512,7 @@ a.hh-item { cursor: pointer; }
 .cat-total { margin: 0 0 0.7rem; }
 .cat-total .muted { color: #4b5563; }
 .cat-note { font-size: 0.85rem; font-style: italic; color: var(--muted); margin: 0 0 0.7rem; }
-.cat-subtable { table-layout: fixed; }
+.cat-subtable { table-layout: fixed; border: 1px solid var(--line); }
 .cat-subtable .col-name { width: 45%; }
 .cat-subtable .col-budget { width: 30%; }
 .cat-subtable .col-op { width: 25%; }
@@ -593,4 +600,7 @@ a.hh-item { cursor: pointer; }
   .cat-body { flex-direction: column; }
   .cat-div-v { display: none; }
   .cat-pane { flex: 1 1 auto; margin-bottom: 1rem; max-width: none; }
+  /* The divider is gone on mobile: the selected-row extension must not
+     run into the card edge. */
+  .cat-row.selected { margin-right: 0; }
 }
