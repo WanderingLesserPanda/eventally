@@ -165,7 +165,7 @@ func (a *App) handleTransferOwnership(w http.ResponseWriter, r *http.Request) {
 	_ = a.Pool.QueryRow(ctx,
 		`SELECT COALESCE(NULLIF(display_name, ''), username) FROM app_user WHERE id = $1`,
 		recipID).Scan(&recipName)
-	a.redirectRef(w, r, "/settings",
+	a.redirectRef(w, r, "/settings/household",
 		fmt.Sprintf("Ownership transferred: %s is now the owner. You are an admin.", recipName))
 }
 
@@ -202,7 +202,7 @@ func (a *App) renderSettingsHousehold(ctx context.Context, w http.ResponseWriter
 			first = recips[0].UserID
 		}
 	}
-	a.renderTabbed(w, r, http.StatusOK, "settings_household.html", "household", map[string]any{
+	a.render(w, r, http.StatusOK, "settings_household.html", map[string]any{
 		"Title":             "Settings · Household",
 		"Memberships":       ms,
 		"Single":            len(ms) == 1,

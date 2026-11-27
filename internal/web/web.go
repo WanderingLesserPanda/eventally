@@ -107,19 +107,21 @@ func (a *App) Router() http.Handler {
 		authed.Post("/accounts/{id}/archive", a.handleAccountArchive)
 		authed.Post("/accounts/{id}/restore", a.handleAccountRestore)
 
-		authed.Get("/categories", a.listCategories)
+		// D37: the D35 two-pane Categories page moved into the settings area
+		// ("set once" data); the old /categories* URLs 302-redirect below.
+		authed.Get("/settings/categories", a.listCategories)
 		// D35: in-page fragment swaps (ADR-0011) — static paths before the
-		// /categories/{id} param route.
-		authed.Get("/categories/pane", a.catPaneFragment)
-		authed.Get("/categories/detail", a.catDetailFragment)
-		authed.Get("/categories/new", a.handleCategoryCreate)
-		authed.Post("/categories", a.handleCategoryCreate)
-		authed.Post("/categories/sort", a.handleCategorySort)
-		authed.Post("/categories/{id}/archive", a.handleCategoryArchive)
-		authed.Post("/categories/{id}/unarchive", a.handleCategoryUnarchive)
-		authed.Get("/categories/{id}", a.handleCategoryEdit)
-		authed.Post("/categories/{id}", a.handleCategoryEdit)
-		authed.Post("/categories/{id}/deactivate", a.handleCategoryDelete)
+		// /settings/categories/{id} param route.
+		authed.Get("/settings/categories/pane", a.catPaneFragment)
+		authed.Get("/settings/categories/detail", a.catDetailFragment)
+		authed.Get("/settings/categories/new", a.handleCategoryCreate)
+		authed.Post("/settings/categories", a.handleCategoryCreate)
+		authed.Post("/settings/categories/sort", a.handleCategorySort)
+		authed.Post("/settings/categories/{id}/archive", a.handleCategoryArchive)
+		authed.Post("/settings/categories/{id}/unarchive", a.handleCategoryUnarchive)
+		authed.Get("/settings/categories/{id}", a.handleCategoryEdit)
+		authed.Post("/settings/categories/{id}", a.handleCategoryEdit)
+		authed.Post("/settings/categories/{id}/deactivate", a.handleCategoryDelete)
 
 		authed.Get("/merchants", a.listMerchants)
 		authed.Get("/merchants/new", a.handleMerchantCreate)
@@ -168,7 +170,6 @@ func (a *App) Router() http.Handler {
 		authed.Post("/settings/mapping", a.handleMappingCreate)
 		authed.Post("/settings/mapping/{id}", a.handleMappingUpdate)
 		authed.Post("/settings/mapping/{id}/delete", a.handleMappingDelete)
-
 		// Phase P4: quick capture (mobile-first, D12) — a few taps to a
 		// pending transaction.
 		authed.Get("/capture", a.captureGET)
@@ -196,15 +197,20 @@ func (a *App) Router() http.Handler {
 		authed.Get("/review", a.handleReview)
 		authed.Post("/review/bulk", a.handleReviewBulk)
 
-		// D28 permission-UI wave: settings (3 tabs), household switcher,
-		// invitations, in-app join.
-		authed.Get("/settings", a.handleSettings)
+		// D28 permission-UI wave: settings (nested under /settings/*, D37),
+		// household switcher, invitations, in-app join. The pre-nesting
+		// /settings URL 302-redirects into the nested routes (tab-aware).
+		authed.Get("/settings", a.handleSettingsRedirect)
+		authed.Get("/settings/household", a.handleSettingsHousehold)
 		authed.Post("/settings/household", a.handleDefaultHouseholdPOST)
+		authed.Get("/settings/invites", a.handleInvites)
 		authed.Post("/settings/invite", a.handleInviteCreate)
 		authed.Post("/settings/invite/revoke/{id}", a.handleInviteRevoke)
 		authed.Post("/settings/invite/expiry", a.handleSetDefaultExpiry)
+		authed.Get("/settings/grants", a.handleGrants)
 		authed.Post("/settings/grants/household/{id}", a.handleHouseholdGrantSave)
 		authed.Post("/settings/grants/account", a.handleAccountGrantSave)
+		authed.Get("/settings/sync", a.handleSettingsSync)
 		authed.Post("/households/switch", a.handleHouseholdSwitch)
 		// D30: ownership transfer (owner only, password re-entry, ADR-0003).
 		authed.Post("/household/transfer-ownership", a.handleTransferOwnership)
@@ -212,6 +218,13 @@ func (a *App) Router() http.Handler {
 		authed.Post("/join/complete", a.handleJoinComplete)
 		authed.Get("/join-with-code", a.handleJoinWithCodeGET)
 		authed.Post("/join-with-code", a.handleJoinWithCodePOST)
+
+		// D37: pre-nesting URLs — 302 into the nested routes (query kept).
+		authed.Get("/categories", a.handleCategoriesRedirect)
+		authed.Get("/categories/new", a.handleCategoriesRedirect)
+		authed.Get("/categories/pane", a.handleCategoriesRedirect)
+		authed.Get("/categories/detail", a.handleCategoriesRedirect)
+		authed.Get("/categories/{id}", a.handleCategoriesRedirect)
 	})
 
 	return r
@@ -251,9 +264,12 @@ func (a *App) requireAuth(next http.Handler) http.Handler {
 }
 
 // householdlessAllowed lists the paths a no-household session may use.
+// "/settings" stays allowed (D37): it 302-redirects into /settings/household,
+// which is the no-household entry point; the other nested sections need a
+// household and are unreachable for these sessions.
 func householdlessAllowed(path string) bool {
 	switch path {
-	case "/", "/households/new", "/join/complete", "/join/dismiss", "/settings", "/join-with-code":
+	case "/", "/households/new", "/join/complete", "/join/dismiss", "/settings", "/settings/household", "/join-with-code":
 		return true
 	}
 	return false

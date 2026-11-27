@@ -471,7 +471,7 @@ func (a *App) handleCategoryCreate(w http.ResponseWriter, r *http.Request) {
 		categoryFormOK(w)
 		return
 	}
-	a.redirectRef(w, r, "/categories", "Category created.")
+	a.redirectRef(w, r, "/settings/categories", "Category created.")
 }
 
 func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
@@ -548,7 +548,7 @@ func (a *App) handleCategoryEdit(w http.ResponseWriter, r *http.Request) {
 		categoryFormOK(w)
 		return
 	}
-	a.redirectRef(w, r, "/categories", "Category saved.")
+	a.redirectRef(w, r, "/settings/categories", "Category saved.")
 }
 
 func (a *App) handleCategoryDelete(w http.ResponseWriter, r *http.Request) {
@@ -564,7 +564,7 @@ func (a *App) handleCategoryDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "deactivate category: "+err.Error(), 500)
 		return
 	}
-	a.redirectRef(w, r, "/categories", "Category deactivated — history keeps its reference.")
+	a.redirectRef(w, r, "/settings/categories", "Category deactivated — history keeps its reference.")
 }
 
 // --- D35 in-page fragments + archive/unarchive (ADR-0011) ------------------

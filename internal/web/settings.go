@@ -14,43 +14,32 @@ import (
 	"time"
 )
 
-// renderTabbed renders a settings tab page inside the shared tab strip.
-// tab is "household" | "invites" | "grants".
-func (a *App) renderTabbed(w http.ResponseWriter, r *http.Request, status int, page, tab string, data map[string]any) {
-	if data == nil {
-		data = map[string]any{}
+// handleSettingsRedirect (D37): the pre-nesting /settings URL — a 302 into
+// the nested routes; the ?tab= value names the section (unknown tabs fall
+// back to Household, as the old dispatcher did for non-admin tabs). The old
+// tab strip is retired — the settings left pane replaced it.
+func (a *App) handleSettingsRedirect(w http.ResponseWriter, r *http.Request) {
+	target := "/settings/household"
+	switch r.URL.Query().Get("tab") {
+	case "invites":
+		target = "/settings/invites"
+	case "grants":
+		target = "/settings/grants"
+	case "sync":
+		target = "/settings/sync"
 	}
-	data["Tab"] = tab
-	data["CanManage"] = a.canManageGrants(r)
-	a.render(w, r, status, page, data)
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
-// handleSettings renders the requested tab. Invites/Grants require the
-// admin tier; non-admins fall back to the Household tab. Sync (D34) is for
-// every member: the auto-sync toggles + the category mappings.
-func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
-	tab := r.URL.Query().Get("tab")
-	if tab == "" {
-		tab = "household"
+// handleCategoriesRedirect (D37): the pre-nesting /categories* URLs — a 302
+// into /settings/categories/* (the query string is preserved, so
+// /categories?class=income lands on the income tab).
+func (a *App) handleCategoriesRedirect(w http.ResponseWriter, r *http.Request) {
+	target := "/settings" + r.URL.Path
+	if q := r.URL.RawQuery; q != "" {
+		target += "?" + q
 	}
-	switch tab {
-	case "invites":
-		if a.canManageGrants(r) {
-			a.handleInvites(w, r)
-			return
-		}
-		tab = "household"
-	case "grants":
-		if a.canManageGrants(r) {
-			a.handleGrants(w, r)
-			return
-		}
-		tab = "household"
-	case "sync":
-		a.handleSettingsSync(w, r)
-		return
-	}
-	a.handleSettingsHousehold(w, r)
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // handleSettingsSync is the Settings "Sync" tab (D34) — the second home of
@@ -189,7 +178,7 @@ func (a *App) handleSettingsSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	a.renderTabbed(w, r, 200, "settings_sync.html", "sync", map[string]any{
+	a.render(w, r, 200, "settings_sync.html", map[string]any{
 		"Title":         "Settings · Sync",
 		"Flash":         flashFrom(r),
 		"Toggles":       toggles,
@@ -247,7 +236,7 @@ func (a *App) handleMappingCreate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	const home = "/settings?tab=sync"
+	const home = "/settings/sync"
 	srcHH, srcCat, err := parseMappingChoice(r.FormValue("source"))
 	if err != nil {
 		http.Error(w, "pick a source category.", http.StatusBadRequest)
@@ -347,7 +336,7 @@ func (a *App) handleMappingUpdate(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	a.redirectRef(w, r, "/settings?tab=sync", "Category mapping updated.")
+	a.redirectRef(w, r, "/settings/sync", "Category mapping updated.")
 }
 
 // handleMappingDelete is POST /settings/mapping/{id}/delete — removes one of
@@ -379,7 +368,7 @@ func (a *App) handleMappingDelete(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	a.redirectRef(w, r, "/settings?tab=sync", "Category mapping removed.")
+	a.redirectRef(w, r, "/settings/sync", "Category mapping removed.")
 }
 
 // handleSettingsHousehold is the Household tab: the caller's default
@@ -427,7 +416,7 @@ func (a *App) handleDefaultHouseholdPOST(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "switch: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/household", http.StatusSeeOther)
 }
 
 // --- Grants tab (owner + admin only) -----------------------------------------
@@ -582,7 +571,7 @@ func (a *App) handleGrants(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = seen
 
-	a.renderTabbed(w, r, http.StatusOK, "settings_grants.html", "grants", map[string]any{
+	a.render(w, r, http.StatusOK, "settings_grants.html", map[string]any{
 		"Title": "Settings · Grants",
 		"HouseholdGrants": hRows,
 		"Accounts":   aRows,
@@ -668,7 +657,7 @@ func (a *App) handleHouseholdGrantSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.Redirect(w, r, "/settings?tab=grants", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/grants", http.StatusSeeOther)
 }
 
 // handleAccountGrantSave upserts one member's grant on one account; deleting
@@ -732,7 +721,7 @@ func (a *App) handleAccountGrantSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.Redirect(w, r, "/settings?tab=grants", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/grants", http.StatusSeeOther)
 }
 
 func validCreatedAll(m string) bool { return m == "created" || m == "all" }

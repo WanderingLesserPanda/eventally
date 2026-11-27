@@ -131,7 +131,7 @@ func (a *App) handleInvites(w http.ResponseWriter, r *http.Request) {
 		"New": map[string]any{"Expiry": defDays},
 		"JoinURL": joinURL(r),
 	}
-	a.renderTabbed(w, r, http.StatusOK, "settings_invites.html", "invites", data)
+	a.render(w, r, http.StatusOK, "settings_invites.html", data)
 }
 
 // handleInviteCreate issues a new code (honouring the cap + per-code expiry
@@ -236,7 +236,7 @@ func (a *App) handleInviteRevoke(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invite not found or already gone", http.StatusNotFound)
 		return
 	}
-	http.Redirect(w, r, "/settings?tab=invites", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/invites", http.StatusSeeOther)
 }
 
 // setDefaultExpiry writes the household's default invite expiry.
@@ -271,7 +271,7 @@ func (a *App) handleSetDefaultExpiry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "set expiry: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/settings?tab=invites", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/invites", http.StatusSeeOther)
 }
 
 // --- join flows -------------------------------------------------------------
@@ -587,7 +587,7 @@ func (a *App) handleJoinWithCodePOST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok, _ := a.isMember(ctx, sess.UserID, inv.HouseholdID); ok {
-		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings/household", http.StatusSeeOther)
 		return
 	}
 	if _, err := a.addMemberWithGrants(ctx, sess.UserID, inv.ID, inv.HouseholdID); err != nil {

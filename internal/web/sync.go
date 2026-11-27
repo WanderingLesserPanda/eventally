@@ -987,7 +987,7 @@ func (a *App) handleSyncAutoPOST(w http.ResponseWriter, r *http.Request) {
 	on := r.FormValue("on") == "1"
 	home := "/sync"
 	if r.FormValue("ret") == "settings" {
-		home = "/settings?tab=sync"
+		home = "/settings/sync"
 	}
 
 	member, err := a.isMember(ctx, user, srcHH)
