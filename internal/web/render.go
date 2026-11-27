@@ -81,6 +81,10 @@ func (a *App) checkCSRF(r *http.Request) error {
 	return nil
 }
 
+// version is the app version shown in the layout footer (D38: "Eventally -
+// v0.1") — bump it in one place.
+const version = "0.1"
+
 // render executes a template in the base layout and writes the response.
 func (a *App) render(w http.ResponseWriter, r *http.Request, status int, name string, data map[string]any) {
 	if data == nil {
@@ -89,6 +93,8 @@ func (a *App) render(w http.ResponseWriter, r *http.Request, status int, name st
 	data["Session"] = sessionFromContext(r.Context())
 	data["Path"] = r.URL.Path
 	data["Year"] = time.Now().Year()
+	// D38: the layout footer shows "Eventally - v<version>" on every page.
+	data["Version"] = version
 	// D37: two layouts — /settings/* gets the settings left pane, everything
 	// else the daily pane. .PageTitle drives the content-pane header row
 	// (the <title> string minus the "Settings · " prefix: "Settings ·

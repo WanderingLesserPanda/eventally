@@ -38,7 +38,7 @@
       {{if .Editing}}
       <label>Parent <span class="muted small">(optional, one level)</span>
         <select name="parent_id" x-model="pid">
-          <option value="">— top level —</option>
+          <option value="">Top level</option>
           {{range .F.ParentOptions}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) (printf "%d" $.F.ParentID)}}selected{{end}}>{{.Name}}</option>{{end}}
         </select>
       </label>

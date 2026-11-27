@@ -2,14 +2,9 @@
 <!-- D35 two-pane Categories page (docs/notes/d35-..., ADR-0011). The page loads
      once, server-rendered; class-tab / row / archive / unarchive are in-page
      fetch swaps (the catsPage Alpine component in layout.html). Create / edit
-     are full-page links in this batch — the modal form lands in Batch 3. -->
+     are full-page links in this batch - the modal form lands in Batch 3. -->
 <div class="cats" x-data="catsPage()" data-class="{{.Class}}" data-csrf="{{if .Session}}{{.Session.CSRFToken}}{{end}}">
   <div id="cat-sort-live" class="sr-only" aria-live="polite"></div>
-  <div class="cat-head">
-    <div>
-      <p class="muted small">A little order for where it all goes.</p>
-    </div>
-  </div>
 
   <div class="cat-toolbar">
     <div class="cat-tabs" role="tablist">
@@ -85,7 +80,7 @@
 
 <div class="cat-total">
   <span class="muted">Total Budget:</span>
-  <b>{{if $d.HasTotal}}{{money $d.Total}}{{else}}—{{end}}</b>
+  <b>{{if $d.HasTotal}}{{money $d.Total}}{{else}}-{{end}}</b>
 </div>
 {{if $d.Note}}<p class="cat-note warn" role="note">{{ $d.Note }}</p>{{end}}
 
@@ -102,7 +97,7 @@
   {{range $d.Subs}}
   <tr{{if not .Active}} class="archived"{{end}} data-child data-id="{{.ID}}" data-name="{{.Name}}">
     <td class="cat-cell-name">{{catIcon .Icon .Colour}} {{.Name}}{{if not .Active}} <span class="tag">archived</span>{{end}}</td>
-    <td class="money">{{if .HasBudget}}{{money .Budget}}{{if eq .BudgetMode "part_of_parent"}} <span class="muted small">(of parent)</span>{{end}}{{else}}—{{end}}</td>
+    <td class="money">{{if .HasBudget}}{{money .Budget}}{{if eq .BudgetMode "part_of_parent"}} <span class="muted small">(of parent)</span>{{end}}{{else}}-{{end}}</td>
     <td class="cat-op">
       <a class="btn-link small" href="/settings/categories/{{.ID}}" @click.prevent="openForm('edit', {{.ID}}, 0)">Edit</a>
       {{if .Active}}<button type="button" class="btn-link small" data-name="{{.Name}}" @click="archiveSub($event, {{.ID}})">Archive</button>{{else}}<button type="button" class="btn-link small" @click="unarchiveSub({{.ID}})">Unarchive</button>{{end}}

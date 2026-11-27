@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · Eventally</title>
 <link rel="stylesheet" href="/static/app.css">
-<!-- D32: Line Awesome 2.1.0 (Icons8, MIT — see static/lineawesome/LICENSE.txt) -->
+<!-- D32: Line Awesome 2.1.0 (Icons8, MIT - see static/lineawesome/LICENSE.txt) -->
 <link rel="stylesheet" href="/static/lineawesome/css/line-awesome.min.css">
 <script src="/static/htmx.min.js" defer></script>
 <script src="/static/alpine.min.js" defer></script>
-<!-- D32: icon picker component (docs/notes/d32-icon-picker.md §E) — search
+<!-- D32: icon picker component (docs/notes/d32-icon-picker.md §E) - search
      filters by glyph label + group name; "Save" commits to the hidden
      icon input; "No icon (use default)" clears it. -->
 <script>
@@ -23,7 +23,7 @@ document.addEventListener('alpine:init', () => {
     pFilter() {
       const q = this.pQ.trim().toLowerCase();
       // $el is the element of the directive that called us (usually the
-      // search input, which lives INSIDE the modal) — so climb up to the
+      // search input, which lives INSIDE the modal) - so climb up to the
       // modal instead of descending from the x-data root. Fall back to a
       // root-relative search if ever called from the root scope.
       const modal = this.$el.closest('.icon-modal') || this.$el.querySelector('.icon-modal');
@@ -555,7 +555,12 @@ document.addEventListener('alpine:init', () => {
   </aside>
   <div class="mainpane">
     <div class="pane-head">
-      {{if .PageTitle}}<h1 class="pane-title">{{.PageTitle}}</h1>{{end}}
+      <!-- D38: title block (title + optional subtitle, e.g. the Categories
+           page) on the left; the controls on the right. -->
+      <div class="pane-title-block">
+        {{if .PageTitle}}<h1 class="pane-title">{{.PageTitle}}</h1>{{end}}
+        {{if .PaneSubtitle}}<p class="pane-subtitle">{{.PaneSubtitle}}</p>{{end}}
+      </div>
       <div class="pane-tools" x-data="{ open: false, confirmNew: false }">
         {{if eq .Layout "settings"}}
         <a class="back-home" href="/"><i class="la la-home" aria-hidden="true"></i>Back to Home</a>
@@ -605,11 +610,11 @@ document.addEventListener('alpine:init', () => {
         </div>
       </div>
     </div>
-    <main class="container{{if eq .Path "/setup"}} container-full{{end}}">
+    <main class="container{{if .Bleed}} container-bleed{{end}}{{if eq .Path "/setup"}} container-full{{end}}">
       {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
       {{.Content}}
     </main>
-    <footer class="footer">Eventally — self-hosted household ledger</footer>
+    <footer class="footer">Eventally - v{{.Version}}</footer>
   </div>
 </div>
 {{else}}
@@ -618,7 +623,7 @@ document.addEventListener('alpine:init', () => {
 {{.Content}}
 </main>
 {{if ne .Path "/setup"}}
-<footer class="footer">Eventally — self-hosted household ledger</footer>
+<footer class="footer">Eventally - v{{.Version}}</footer>
 {{end}}
 {{end}}
 </body>

@@ -99,15 +99,19 @@ func (a *App) listCategories(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// D38: the page fills the content pane (Bleed, no centered max-width) and
+	// the subtitle moves from the card into the pane header, under the title.
 	a.render(w, r, 200, "reference_categories.html", map[string]any{
-		"Title":      "Categories",
-		"Flash":      flashFrom(r),
-		"Section":    "categories",
-		"Class":      class,
-		"SelectedID": selID,
-		"Rows":       rows,
-		"Detail":     detail,
-		"Classes":    categoryClasses,
+		"Title":        "Categories",
+		"Flash":        flashFrom(r),
+		"Section":      "categories",
+		"Bleed":        true,
+		"PaneSubtitle": "A little order for where it all goes.",
+		"Class":        class,
+		"SelectedID":   selID,
+		"Rows":         rows,
+		"Detail":       detail,
+		"Classes":      categoryClasses,
 	})
 }
 
