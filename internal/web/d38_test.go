@@ -17,6 +17,12 @@
 // highlight extension to the divider is restored (ground-truth reference
 // shows 0px gap), the vertical line meets the horizontal rule under the
 // tabs seamlessly, and the subcategory table gains its outer border.
+// Feedback round 4 (user screenshot, 2026-11-27): the extension becomes a
+// ::after bleed band (the r3 negative margin shifted the count number 1.2rem
+// right, so every row's count must keep the same divider spacing); the hover
+// highlight goes flat (no border radius) and bleeds to the divider too; the
+// drag card's Edit/Archive cluster mirrors the table (0.5rem gaps + normal
+// weight) so the floating row aligns with the rows beneath.
 // The shape half asserts the shipped CSS/templates; the router half verifies
 // the rendered page. Skipped unless EVENTALLY_TEST_DSN is set.
 package web
@@ -48,20 +54,53 @@ func TestD38Shape(t *testing.T) {
 		t.Errorf("item3: .cat-tab still has the 99px pill radius")
 	}
 
-	// Item 4: the selected row highlight is flat and runs all the way to
-	// the vertical divider (feedback r3 restored the extension: the round-2
-	// "row grows" complaint was the collapsed divider underneath it; with
-	// the divider pinned, the -1.2rem ends exactly on the divider's left
-	// edge - zero gap, no overlap).
+	// Item 4 (revised in feedback r4): the selected-row highlight is flat and
+	// runs all the way to the vertical divider via a ::after bleed band - the
+	// row's box itself is NOT stretched (the r3 negative margin shifted the
+	// count number 1.2rem right; every row's count must keep the same
+	// spacing from the divider), so only the background reaches the line.
 	if !hasRule(css, ".cat-row.selected", "border-radius: 0") {
 		t.Errorf("item4: .cat-row.selected missing border-radius: 0")
 	}
-	if !hasRule(css, ".cat-row.selected", "margin-right: -1.2rem") {
-		t.Errorf("item4: .cat-row.selected missing the edge-to-divider margin")
+	if hasRule(css, ".cat-row.selected", "margin-right") {
+		t.Errorf("item4: .cat-row.selected must not stretch the box (r3 margin extension retracted)")
 	}
-	// The mobile layout has no divider: the extension must be reset there.
-	if !hasRule(css, ".cat-row.selected", "margin-right: 0") {
-		t.Errorf("item4: mobile reset .cat-row.selected margin-right: 0 missing")
+	if !hasRule(css, ".cat-row.selected::after", "width: 1.2rem") {
+		t.Errorf("item4: .cat-row.selected::after missing the 1.2rem bleed band")
+	}
+	if !hasRule(css, ".cat-row.selected::after", "background: var(--sel)") {
+		t.Errorf("item4: .cat-row.selected::after must use the selected tint")
+	}
+
+	// Feedback r4: the hover highlight is flat (no border radius) and also
+	// bleeds all the way to the divider.
+	if !hasRule(css, ".cat-row:hover", "border-radius: 0") {
+		t.Errorf("fb4: .cat-row:hover must be flat (no border radius)")
+	}
+	if !hasRule(css, ".cat-row:hover::after", "width: 1.2rem") {
+		t.Errorf("fb4: .cat-row:hover::after missing the 1.2rem bleed band")
+	}
+	if !hasRule(css, ".cat-row:hover::after", "background: var(--bg)") {
+		t.Errorf("fb4: .cat-row:hover::after must use the hover tint")
+	}
+	// The hollow slot of a row being dragged must not show the band.
+	if !hasRule(css, ".cat-row.drag-slot::after", "display: none") {
+		t.Errorf("fb4: .cat-row.drag-slot::after must be hidden")
+	}
+	// The drag card's op cluster mirrors the table (same gaps + weight),
+	// otherwise the floating row's Edit/Archive drift from the rows beneath.
+	if !hasRule(css, ".drag-card-sub .dc-op", "font-weight: 400") {
+		t.Errorf("fb4: .drag-card-sub .dc-op must render at table weight (400)")
+	}
+	if !hasRule(css, ".drag-card-sub .dc-op > * + *", "margin-left: 0.5rem") {
+		t.Errorf("fb4: .drag-card-sub .dc-op missing the table's 0.5rem sibling gap")
+	}
+	// The mobile layout has no divider: the bleeds must be reset there.
+	if !hasRule(css, ".cat-row.selected::after", "display: none") {
+		t.Errorf("item4: mobile reset .cat-row.selected::after display: none missing")
+	}
+	if !hasRule(css, ".cat-row:hover::after", "display: none") {
+		t.Errorf("fb4: mobile reset .cat-row:hover::after display: none missing")
 	}
 
 	// Feedback r2: the vertical divider is a pinned (non-shrinkable) flex
