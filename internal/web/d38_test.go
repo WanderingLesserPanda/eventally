@@ -4,9 +4,14 @@
 // settled: (1) the Categories window fills the Settings content pane
 // (Categories only); (2) the subtitle moves out of the card into the pane
 // header; (3) active tab radius 5px; (4) the selected row highlight is flat
-// and runs edge-to-edge to the vertical divider; (5) the footer reads
+// and the row keeps a consistent width (feedback round 2, 2026-11-27,
+// withdrew the original edge-to-divider extension: it read as the row
+// growing on click and covered the divider); (5) the footer reads
 // "Eventally - v<version>" with a version constant (v0.1); (6) empty-value
 // placeholders are hyphens, not em dashes (Categories page only).
+// Feedback round 2 (user screenshot on the Penpot Feedback page) added:
+// the divider must never collapse (pinned flex item), the left pane width
+// is capped for large monitors, and the subtitle sits close to the window.
 // The shape half asserts the shipped CSS/templates; the router half verifies
 // the rendered page. Skipped unless EVENTALLY_TEST_DSN is set.
 package web
@@ -38,16 +43,28 @@ func TestD38Shape(t *testing.T) {
 		t.Errorf("item3: .cat-tab still has the 99px pill radius")
 	}
 
-	// Item 4: the selected row highlight is flat and runs to the divider.
+	// Item 4: the selected row highlight is flat and the row stays the same
+	// width as the other rows (feedback r2 dropped the edge-to-divider
+	// extension: it widened the row on click and covered the divider).
 	if !hasRule(css, ".cat-row.selected", "border-radius: 0") {
 		t.Errorf("item4: .cat-row.selected missing border-radius: 0")
 	}
-	if !hasRule(css, ".cat-row.selected", "margin-right: -1.2rem") {
-		t.Errorf("item4: .cat-row.selected missing the edge-to-divider margin")
+	if hasRule(css, ".cat-row.selected", "margin-right") {
+		t.Errorf("item4: .cat-row.selected still carries a margin-right extension")
 	}
-	// The mobile layout has no divider: the extension must be reset there.
-	if !hasRule(css, ".cat-row.selected", "margin-right: 0") {
-		t.Errorf("item4: mobile reset .cat-row.selected margin-right: 0 missing")
+
+	// Feedback r2: the vertical divider is a pinned (non-shrinkable) flex
+	// item so it can never be squeezed to 0 by detail-pane content overflow.
+	if !hasRule(css, ".cat-div-v", "flex: 0 0 1px") {
+		t.Errorf("fb2: .cat-div-v must be flex: 0 0 1px (a shrinkable 1px item collapses to 0)")
+	}
+	// The left pane is capped so it does not get too wide on large monitors.
+	if !hasRule(css, ".cat-pane", "max-width: 360px") {
+		t.Errorf("fb2: .cat-pane missing the max-width cap")
+	}
+	// The subtitle sits close above the window (tightened top margin).
+	if !hasRule(css, ".container-bleed", "margin: 0.2rem 1.4rem 0") {
+		t.Errorf("fb2: .container-bleed top margin not tightened")
 	}
 
 	// Item 1: the bleed container drops the centered max-width.

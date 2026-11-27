@@ -82,8 +82,10 @@ label.checkline input { width: auto; margin: 0 0.3rem 0 0; }
 .container { max-width: 1080px; margin: 1.4rem auto; padding: 0 1rem; }
 .container-full { max-width: none; margin: 0; padding: 0; }
 /* D38: the Categories page fills the content pane edge-to-edge (same left
-   inset as the pane title, mirrored right, no centered max-width). */
-.container-bleed { max-width: none; margin: 0.9rem 1.4rem 0; padding: 0; }
+   inset as the pane title, mirrored right, no centered max-width). D38
+   feedback r2: the top margin is small - the subtitle sits close above the
+   window, not floating. */
+.container-bleed { max-width: none; margin: 0.2rem 1.4rem 0; padding: 0; }
 .container-bleed .cats { margin-bottom: 0.5rem; }
 .card {
   background: var(--card); border: 1px solid var(--line);
@@ -467,8 +469,15 @@ a.hh-item { cursor: pointer; }
 .cat-tab:hover { color: var(--accent); }
 .cat-tab.active { background: var(--band); color: var(--accent); }
 .cat-body { display: flex; align-items: stretch; }
-.cat-pane { flex: 0 0 25%; min-width: 200px; }
-.cat-div-v { width: 1px; background: var(--line); margin: 0 1.2rem; }
+/* D38 feedback r2: the left pane is capped so it does not get too wide on
+   large monitors (25% only kicks in up to the cap; smaller screens are
+   unaffected because their 25% is already below it). */
+.cat-pane { flex: 0 0 25%; min-width: 200px; max-width: 360px; }
+/* D38 feedback r2: flex: 0 0 1px pins the divider so it can never be
+   squeezed to 0 by flex overflow (a shrinkable 1px flex item collapsed
+   whenever the detail pane's content was wider than the remaining space,
+   making the line vanish). */
+.cat-div-v { flex: 0 0 1px; background: var(--line); margin: 0 1.2rem; }
 .cat-detail { flex: 1 1 auto; min-width: 0; }
 .cat-list { list-style: none; margin: 0; padding: 0; }
 .cat-row {
@@ -480,10 +489,11 @@ a.hh-item { cursor: pointer; }
 .cat-row .cat-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cat-row .cat-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .cat-row:hover { background: var(--bg); }
-/* D38: the selected row is flat (no radius) and the highlight runs edge-to-
-   edge of the list, all the way to the vertical divider (the divider's own
-   1.2rem left margin is eaten back), with the accent bar on the far left. */
-.cat-row.selected { background: var(--sel); border-left-color: var(--accent); color: var(--accent); border-radius: 0; margin-right: -1.2rem; }
+/* D38: the selected row is flat (no radius), cream tint, accent bar on the
+   far left. D38 feedback r2: the row keeps the SAME width as the other rows
+   (the earlier edge-to-divider extension read as the row "growing" on click
+   and covered the divider, so it was dropped). */
+.cat-row.selected { background: var(--sel); border-left-color: var(--accent); color: var(--accent); border-radius: 0; }
 .cat-row.selected .cat-count { color: var(--accent); opacity: 0.7; }
 .cat-row.archived { opacity: 0.55; }
 .cat-empty { color: var(--muted); padding: 0.6rem 0.2rem; }
@@ -582,7 +592,5 @@ a.hh-item { cursor: pointer; }
 @media (max-width: 760px) {
   .cat-body { flex-direction: column; }
   .cat-div-v { display: none; }
-  .cat-pane { flex: 1 1 auto; margin-bottom: 1rem; }
-  /* The divider is gone: the selected highlight no longer runs to a line. */
-  .cat-row.selected { margin-right: 0; }
+  .cat-pane { flex: 1 1 auto; margin-bottom: 1rem; max-width: none; }
 }
