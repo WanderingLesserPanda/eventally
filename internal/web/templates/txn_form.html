@@ -2,9 +2,6 @@
 {{$root := .}}
 {{$f := .F}}
 <div class="card">
-  <div class="page-head">
-    <h1>{{if $f.Editing}}Edit transaction{{else}}New transaction{{end}}</h1>
-  </div>
   {{if $f.Err}}<div class="error">{{$f.Err}}</div>{{end}}
   {{if $f.Locked}}<div class="flash">This transaction can no longer be edited: a settlement already references its splits.</div>{{end}}
   <form method="post" action="{{if $f.Editing}}/txns/{{$f.ID}}{{else}}/txns{{end}}">

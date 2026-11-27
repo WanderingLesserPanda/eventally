@@ -1,6 +1,5 @@
 {{define "page/new_household"}}
 <div class="card auth-card">
-  <h1>New household</h1>
   <p class="muted">You'll be the owner of this new household and land in it once it's created.</p>
   {{if .F.Err}}<div class="error">{{.F.Err}}</div>{{end}}
   <form method="post" action="/households/new">

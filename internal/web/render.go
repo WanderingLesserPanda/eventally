@@ -89,6 +89,23 @@ func (a *App) render(w http.ResponseWriter, r *http.Request, status int, name st
 	data["Session"] = sessionFromContext(r.Context())
 	data["Path"] = r.URL.Path
 	data["Year"] = time.Now().Year()
+	// D37: two layouts — /settings/* gets the settings left pane, everything
+	// else the daily pane. .PageTitle drives the content-pane header row
+	// (the <title> string minus the "Settings · " prefix: "Settings ·
+	// Invites" → "Invites", matching the sidebar section names).
+	layout := "daily"
+	if strings.HasPrefix(r.URL.Path, "/settings/") {
+		layout = "settings"
+	}
+	data["Layout"] = layout
+	if ts, ok := data["Title"].(string); ok && ts != "" {
+		data["PageTitle"] = strings.TrimPrefix(ts, "Settings · ")
+	}
+	if layout == "settings" && sessionFromContext(r.Context()) != nil {
+		// The settings pane hides the admin-only entries (Invites/Grants)
+		// entirely for non-admins — whole link, not a disabled state.
+		data["CanManage"] = a.canManageGrants(r)
+	}
 	// D28: the nav-bar household switcher (2+ memberships) + current name.
 	if s := sessionFromContext(r.Context()); s != nil && s.HasHousehold() {
 		if ms := a.switchHouseholds(r.Context()); len(ms) > 0 {

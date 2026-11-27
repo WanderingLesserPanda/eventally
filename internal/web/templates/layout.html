@@ -510,79 +510,116 @@ document.addEventListener('alpine:init', () => {
 </head>
 <body{{if eq .Path "/setup"}} class="setup-page"{{end}}>
 {{if .Session}}
-<header class="topbar">
-  <a class="brand" href="/">Eventally</a>
-  <nav>
-    <a href="/" class="{{if eq .Path "/"}}active{{end}}">Dashboard</a>
-    <a href="/capture" class="{{if hasPrefix .Path "/capture"}}active{{end}}">Capture</a>
-    <a href="/txns">Transactions</a>
-    {{if .SyncNav}}<a href="/sync" class="{{if eq .Path "/sync"}}active{{end}}">From other households</a>{{end}}
-    <a href="/cards">Cards</a>
-    <a href="/reconcile">Reconcile</a>
-    <a href="/recurring">Recurring</a>
-    <a href="/review">Review</a>
-    <a href="/settings">Settings</a>
-  </nav>
-  <nav class="nav-sub">
-    <a href="/accounts" class="{{if hasPrefix .Path "/accounts"}}active{{end}}">Accounts</a>
-    <a href="/categories" class="{{if hasPrefix .Path "/categories"}}active{{end}}">Categories</a>
-    <a href="/merchants" class="{{if hasPrefix .Path "/merchants"}}active{{end}}">Merchants</a>
-    <a href="/parties" class="{{if hasPrefix .Path "/parties"}}active{{end}}">Parties</a>
-  </nav>
-  <div class="user" x-data="{ open: false, confirmNew: false }">
-    {{if .Switcher}}
-    <div class="hh-switcher">
-      <button type="button" @click="open = !open" class="hh-current" aria-haspopup="true">
-        {{.HouseholdName}} <span class="caret">▾</span>
-      </button>
-      <div x-show="open" @click.outside="open = false" x-cloak class="hh-menu">
-        <div class="hh-menu-title">Switch household</div>
-        {{range .Switcher}}
-          {{if .IsCurrent}}
-          <div class="hh-item current">{{.Name}}<span class="muted small"> (current)</span></div>
-          {{else}}
-          <form method="post" action="/households/switch">
-            {{template "csrf" $}}
-            <input type="hidden" name="household_id" value="{{.HouseholdID}}">
-            <button type="submit" class="hh-item">{{.Name}}</button>
-          </form>
-          {{end}}
+<!-- D37: two layouts, each with its own left pane (.Layout = "daily" |
+     "settings", set in render()). Daily: a flat pane of the day-to-day
+     destinations (board order), a cogwheel in the content-pane header row,
+     and Sign out in the pane footer. Settings: its own administration
+     pane (admin-only entries hidden for non-admins), the logo linking
+     home, and the labeled "Back to Home" pill in the cogwheel's spot.
+     The household switcher sits top-right of the content pane in both. -->
+<div class="shell">
+  <aside class="sidepane">
+    {{if eq .Layout "settings"}}
+    <a class="brand" href="/">Eventally</a>
+    {{else}}
+    <span class="brand">Eventally</span>
+    {{end}}
+    <nav class="sidenav">
+      {{if eq .Layout "settings"}}
+      <a href="/settings/household" class="{{if hasPrefix .Path "/settings/household"}}active{{end}}">Household</a>
+      <a href="/settings/categories" class="{{if hasPrefix .Path "/settings/categories"}}active{{end}}">Categories</a>
+      {{if .CanManage}}
+      <a href="/settings/invites" class="{{if eq .Path "/settings/invites"}}active{{end}}">Invites</a>
+      <a href="/settings/grants" class="{{if eq .Path "/settings/grants"}}active{{end}}">Grants</a>
+      {{end}}
+      <a href="/settings/sync" class="{{if eq .Path "/settings/sync"}}active{{end}}">Sync</a>
+      {{else}}
+      <a href="/" class="{{if eq .Path "/"}}active{{end}}">Dashboard</a>
+      <a href="/capture" class="{{if hasPrefix .Path "/capture"}}active{{end}}">Capture</a>
+      <a href="/txns" class="{{if hasPrefix .Path "/txns"}}active{{end}}">Transactions</a>
+      <a href="/cards" class="{{if hasPrefix .Path "/cards"}}active{{end}}">Cards</a>
+      <a href="/reconcile" class="{{if hasPrefix .Path "/reconcile"}}active{{end}}">Reconcile</a>
+      <a href="/recurring" class="{{if hasPrefix .Path "/recurring"}}active{{end}}">Recurring</a>
+      <a href="/review" class="{{if hasPrefix .Path "/review"}}active{{end}}">Review</a>
+      {{if .SyncNav}}
+      <a href="/sync" class="{{if hasPrefix .Path "/sync"}}active{{end}}">From other households</a>
+      {{end}}
+      <a href="/accounts" class="{{if hasPrefix .Path "/accounts"}}active{{end}}">Accounts</a>
+      <a href="/merchants" class="{{if hasPrefix .Path "/merchants"}}active{{end}}">Merchants</a>
+      <a href="/parties" class="{{if hasPrefix .Path "/parties"}}active{{end}}">Parties</a>
+      {{end}}
+    </nav>
+    <div class="side-foot">
+      <form method="post" action="/logout">{{template "csrf" .}}<button type="submit" class="signout-link">Sign out</button></form>
+    </div>
+  </aside>
+  <div class="mainpane">
+    <div class="pane-head">
+      {{if .PageTitle}}<h1 class="pane-title">{{.PageTitle}}</h1>{{end}}
+      <div class="pane-tools" x-data="{ open: false, confirmNew: false }">
+        {{if eq .Layout "settings"}}
+        <a class="back-home" href="/"><i class="la la-home" aria-hidden="true"></i>Back to Home</a>
+        {{else}}
+        <a class="cog-btn" href="/settings/household" title="Settings" aria-label="Settings"><i class="la la-cog" aria-hidden="true"></i></a>
         {{end}}
-        <hr class="hh-sep">
-        <a class="hh-item" href="/join-with-code">Join with code…</a>
-        <button type="button" class="hh-item" @click="open = false; confirmNew = true">＋ New household</button>
-      </div>
-    </div>
-    {{end}}
-    {{if .Session}}
-    <div x-show="confirmNew" x-cloak class="hh-modal-backdrop" @click.self="confirmNew = false">
-      <div class="hh-modal" role="dialog" aria-modal="true" aria-label="Create a new household">
-        <h3>New household</h3>
-        <p class="muted small">You'll be the owner of this new household. This cannot be undone.</p>
-        <form method="post" action="/households/new">
-          {{template "csrf" .}}
-          <label>Name
-            <input type="text" name="name" required maxlength="80" placeholder="e.g. Our other place">
-          </label>
-          <p class="muted small">Base currency defaults to MYR; first day of the week to Monday.</p>
-          <div class="row">
-            <button type="submit" class="btn-primary">Create household</button>
-            <button type="button" class="btn-link" @click="confirmNew = false">Cancel</button>
+        {{if .Switcher}}
+        <div class="hh-switcher">
+          <button type="button" @click="open = !open" class="hh-current" aria-haspopup="true">
+            {{.HouseholdName}} <span class="caret">▾</span>
+          </button>
+          <div x-show="open" @click.outside="open = false" x-cloak class="hh-menu">
+            <div class="hh-menu-title">Switch household</div>
+            {{range .Switcher}}
+              {{if .IsCurrent}}
+              <div class="hh-item current">{{.Name}}<span class="muted small"> (current)</span></div>
+              {{else}}
+              <form method="post" action="/households/switch">
+                {{template "csrf" $}}
+                <input type="hidden" name="household_id" value="{{.HouseholdID}}">
+                <button type="submit" class="hh-item">{{.Name}}</button>
+              </form>
+              {{end}}
+            {{end}}
+            <hr class="hh-sep">
+            <a class="hh-item" href="/join-with-code">Join with code…</a>
+            <button type="button" class="hh-item" @click="open = false; confirmNew = true">＋ New household</button>
           </div>
-        </form>
+        </div>
+        {{end}}
+        <div x-show="confirmNew" x-cloak class="hh-modal-backdrop" @click.self="confirmNew = false">
+          <div class="hh-modal" role="dialog" aria-modal="true" aria-label="Create a new household">
+            <h3>New household</h3>
+            <p class="muted small">You'll be the owner of this new household. This cannot be undone.</p>
+            <form method="post" action="/households/new">
+              {{template "csrf" .}}
+              <label>Name
+                <input type="text" name="name" required maxlength="80" placeholder="e.g. Our other place">
+              </label>
+              <p class="muted small">Base currency defaults to MYR; first day of the week to Monday.</p>
+              <div class="row">
+                <button type="submit" class="btn-primary">Create household</button>
+                <button type="button" class="btn-link" @click="confirmNew = false">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
       </div>
     </div>
-    {{end}}
-    <form method="post" action="/logout" style="display:inline">{{template "csrf" .}}<button class="btn-link">Sign out</button></form>
+    <main class="container{{if eq .Path "/setup"}} container-full{{end}}">
+      {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+      {{.Content}}
+    </main>
+    <footer class="footer">Eventally — self-hosted household ledger</footer>
   </div>
-</header>
-{{end}}
+</div>
+{{else}}
 <main class="container{{if eq .Path "/setup"}} container-full{{end}}">
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
 {{.Content}}
 </main>
 {{if ne .Path "/setup"}}
 <footer class="footer">Eventally — self-hosted household ledger</footer>
+{{end}}
 {{end}}
 </body>
 </html>

@@ -17,17 +17,56 @@ body {
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 a { color: var(--accent); text-decoration: none; }
-.topbar {
-  display: flex; align-items: center; gap: 1.5rem;
-  background: var(--card); border-bottom: 1px solid var(--line);
-  padding: 0.6rem 1.2rem;
+/* D37: two-layout shell — a left pane (daily or settings) + a content pane
+   whose header row carries the page title (left) and the controls (right:
+   the cogwheel or the "Back to Home" pill, then the household switcher). */
+.shell { display: flex; align-items: stretch; min-height: 100vh; }
+.sidepane {
+  width: 220px; flex-shrink: 0; background: var(--card);
+  border-right: 1px solid var(--line); padding: 1rem 0.8rem 0.8rem;
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
 }
-.topbar .brand { font-weight: 700; font-size: 1.05rem; color: var(--ink); }
-.topbar nav { display: flex; gap: 1rem; flex: 1; flex-wrap: wrap; }
-.topbar nav a { color: var(--muted); padding: 0.2rem 0; }
-.topbar nav a.active, .topbar nav a:hover { color: var(--ink); }
-.topbar .nav-sub { display: flex; gap: 1rem; flex: 1; flex-wrap: wrap; }
-.topbar .nav-sub a { font-size: 0.82rem; }
+.sidepane .brand { display: block; font-weight: 700; font-size: 1.05rem; color: var(--accent); padding: 0 0.6rem 0.9rem; }
+.sidenav { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; }
+.sidenav a { display: block; padding: 0.42rem 0.6rem; border-radius: 8px; color: var(--muted); }
+.sidenav a:hover { color: var(--ink); background: var(--bg); }
+/* Active item: warm peach tint + accent bar (per the adopted boards). */
+.sidenav a.active { position: relative; background: var(--band); color: var(--accent); font-weight: 600; }
+.sidenav a.active::before {
+  content: ""; position: absolute; left: 0; top: 0.35rem; bottom: 0.35rem;
+  width: 3px; border-radius: 2px; background: var(--accent);
+}
+.side-foot { padding: 0.6rem 0.6rem 0; border-top: 1px solid var(--line); margin-top: 1rem; }
+.signout-link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; }
+.signout-link:hover { color: var(--accent); }
+.mainpane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pane-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1rem 1.4rem 0.5rem;
+}
+.pane-title { margin: 0; font-size: 1.3rem; }
+.pane-tools { display: flex; align-items: center; gap: 0.6rem; }
+.cog-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.2rem; height: 2.2rem; background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; color: var(--muted);
+}
+.cog-btn:hover { color: var(--accent); border-color: var(--accent); }
+.back-home {
+  display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 700;
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: 0.35rem 0.9rem; color: var(--ink);
+}
+.back-home:hover { color: var(--accent); border-color: var(--accent); }
+@media (max-width: 760px) {
+  .shell { flex-direction: column; }
+  .sidepane { width: 100%; height: auto; position: static; }
+  .sidenav { flex-direction: row; flex-wrap: wrap; gap: 0.2rem; }
+  .side-foot { margin-top: 0.4rem; }
+}
+/* A page-head left with only its actions (the title moved to the pane
+   header in D37) right-aligns them instead of straddling an empty left. */
+.page-head:has(> :only-child) { justify-content: flex-end; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.8rem; }
 .page-head h1 { margin-bottom: 0; }
 tr.inactive td { opacity: 0.55; }
@@ -36,7 +75,6 @@ tr.inactive td { opacity: 0.55; }
 label.checkline { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; margin-bottom: 1rem; }
 label.checkline input { width: auto; margin: 0 0.3rem 0 0; }
 .row-actions { display: flex; gap: 0.4rem; justify-content: flex-end; white-space: nowrap; }
-.topbar .user { display: flex; align-items: center; gap: 0.6rem; color: var(--muted); }
 .container { max-width: 1080px; margin: 1.4rem auto; padding: 0 1rem; }
 .container-full { max-width: none; margin: 0; padding: 0; }
 .card {
