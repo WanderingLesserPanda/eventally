@@ -19,7 +19,7 @@ body {
 a { color: var(--accent); text-decoration: none; }
 /* D37: two-layout shell — a left pane (daily or settings) + a content pane
    whose header row carries the page title (left) and the controls (right:
-   the cogwheel or the "Back to Home" pill, then the household switcher). */
+   the cogwheel or the "Back to Home" button, then the household switcher). */
 .shell { display: flex; align-items: stretch; min-height: 100vh; }
 .sidepane {
   width: 220px; flex-shrink: 0; background: var(--card);
@@ -55,9 +55,12 @@ a { color: var(--accent); text-decoration: none; }
   border-radius: 8px; color: var(--muted);
 }
 .cog-btn:hover { color: var(--accent); border-color: var(--accent); }
+/* D40: the header controls share one look: 8px rounded corners (the old
+   999px pill was too round) and a white card fill (the switcher used to
+   sit bare on the page background). */
 .back-home {
   display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 700;
-  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
   padding: 0.35rem 0.9rem; color: var(--ink);
 }
 .back-home:hover { color: var(--accent); border-color: var(--accent); }
@@ -326,7 +329,7 @@ body.setup-page {
    grant rows. */
 .hh-switcher { position: relative; }
 .hh-current {
-  background: none; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
   padding: 0.35rem 0.7rem; font: inherit; font-weight: 600; color: var(--ink);
   cursor: pointer;
 }
